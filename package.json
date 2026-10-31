@@ -1,0 +1,21 @@
+{
+  "name": "course-adjustment-spec",
+  "private": true,
+  "version": "0.2.0",
+  "type": "module",
+  "description": "校内课务协同系统 — 契约层 + 领域内核（仅虚构数据）",
+  "scripts": {
+    "test": "vitest run",
+    "test:contract": "vitest run spec",
+    "test:p2": "vitest run tests",
+    "test:meta": "vitest run spec/meta.spec.ts",
+    "typecheck": "tsc --noEmit",
+    "demo": "tsx scripts/demo-p2.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "tsx": "^4.23.15",
+    "typescript": "^5.9.3",
+    "vitest": "^5.0.5"
+  }
+}
