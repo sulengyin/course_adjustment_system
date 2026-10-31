@@ -1,0 +1,53 @@
+﻿id,domain,requirement,source,tag,scenario,evidence,status
+A1,身份,账号由学校统一开通，禁止自由注册获得教师身份,V2.3-01 §2.2 / 02 决策清单,C,,docs/permission-matrix.md,planned(P2)
+A2,身份,稳定教师ID，同名/改名/离职不混淆,V2.3-01 §3 / 02,C,V23-01,spec/v23.spec.ts,verified
+A3,权限,服务端逐操作逐资源校验，前端隐藏不算授权,V2.3-01 §2.2 /04 §1,C,V23-13,spec/v23.spec.ts,verified
+A4,权限,教师可看他人正常课表与已确认客观任务；私人理由不公开,V2.3-01 §2.2,C,V23-13,spec/ac.spec.ts#AC05,verified
+A5,权限,协调者/记录者/确认者/裁决者/管理员互不蕴含,V2.3-01 §2 / R05 §3,C,,docs/permission-matrix.md,defined
+A6,权限,系统管理员不代确认、不默认裁决,V2.3-02 R02 / R05 D04,C,V23-13,spec/v23.spec.ts,verified
+B1,主数据,学期/校历/教师/班级/学科/任课关系/节次可版本化,V2.3-01 §3,C,,docs/state-machines.md,planned(P2)
+B2,主数据,校本作息第4节11:20-11:40为可配置项，不得写死,V2.3-01 §3,C,CFG-01,spec/config.spec.ts,verified
+B3,主数据,单双周/节假日/调休按校历解析，不得按自然日推算,V2.3-01 §10,C,V23-01,spec/v23.spec.ts,verified
+B4,主数据,区分模板节次与日期实例与时间范围,V2.3-01 §3,C,V23-01,spec/types.ts,verified
+C1,课次,七类事实概念分离（模板/课次/例外/责任/任务/待核验/执行）,V2.3-01 §3 / R05 §3,C,,docs/state-machines.md,defined
+C2,课次,稳定ID：teacher/class/occurrence/obligation/change/source/version,V2.3-04 §1,C,,spec/types.ts,defined
+C3,课次,不得用备注正则识别业务身份,V2.3-01 §3,C,,docs/invariants.md,rule
+C4,课次,缺结束时间保持不确定且不自动硬阻断,V2.3-01 §3 / V2.3-04 必测2,C,V23-02,spec/v23.spec.ts,verified
+C5,课次,备案课后服务不表述为当天实际占用,R05 §2 / AC13,C,AC13,spec/ac.spec.ts,verified
+D1,调课,必要确认者由受影响集合计算,V2.3-01 §4 R01,C,V23-03,spec/v23.spec.ts,verified
+D2,调课,班主任不自动确认，生效后仅通知,V2.3-01 §4 R01,C,V23-03,spec/v23.spec.ts,verified
+D3,调课,确认绑定方案版本，改版后旧确认失效,V2.3-01 §4.1,C,AC06,spec/ac.spec.ts,verified
+D4,调课,全确认+冲突复核+版本校验后单事务整体生效,V2.3-01 §4.2,C,,docs/state-machines.md,planned(P4)
+D5,调课,未回复/已读/拒绝/过期均不视为同意,V2.3-01 §4.4,C,AC03,spec/ac.spec.ts,verified
+D6,调课,生效后不可删除，取消须新方案并重新确认,V2.3-02 R02,C,,docs/state-machines.md,planned(P4)
+D7,调课,已执行课次不被恢复方案改写,V2.3-02 R02-A,C,V23-05,spec/v23.spec.ts,verified
+D8,调课,资料性纠错可免确认但白名单未定,V2.3-01 §4.6 / BIZ-01,C,AC07,spec/ac.spec.ts,verified(识别) blocked(白名单)
+E1,应急,求助/登记/本人接受/正式生效/实际执行五件事分离,V2.3-01 §5 / R05 §3,C,AC10,spec/ac.spec.ts,verified
+E2,应急,普通教师可求助；仅授权人员可登记临时安排,V2.3-01 §5.1,C,AC11,spec/ac.spec.ts,verified(接口) blocked(任职名单)
+E3,应急,口头接受可登记；本人补确认保留真实时间,V2.3-01 §5.2,C,AC05,spec/ac.spec.ts,verified
+E4,应急,补确认应在下一工作日结束前；逾期待核验,V2.3-02 R02-B3-1,C,,docs/decisions.csv#BIZ-04,blocked(截止钟点)
+E5,应急,应急责任组+当日主责+排班代理+最终兜底岗位,V2.3-01 §5.3,C,,docs/permission-matrix.md,blocked(岗位未定)
+E6,应急,主责明确拒绝立即升级代理并留痕,V2.3-02 O3,C,V23-09,spec/v23.spec.ts,verified
+E7,应急,先有效接单者为唯一当前负责人,V2.3-02 O2,C,V23-10,spec/v23.spec.ts,verified
+E8,应急,结案与授课事实核验分离,V2.3-02 R02-B4-2,C,V23-11,spec/v23.spec.ts,verified
+E9,应急,结案须记录结果/经过/责任人/时间/联系记录,V2.3-02 R02-B4-7,C,,docs/state-machines.md,planned(P6)
+E10,应急,口头协调接单可临时显示，本人事后追认,V2.3-02 O1,C,,docs/decisions.csv#O5,blocked(追认期限)
+E11,应急,校外求助经人工沟通+校内代录，代录不代确认,R05 §0.5 / AC11,C,AC11,spec/ac.spec.ts,verified
+F1,导入,上传-映射-校验-预览-提交，失败不污染正式数据,V2.3-01 §3 /04 §1,C,,docs/decisions.csv#S01,planned(P3)
+F2,导入,重复文件与行序变化不重复生成课务,V2.3-04 必测12,C,V23-12,spec/v23.spec.ts,verified(变更侧)
+F3,导入,导入文件不等于学校正式发布,V2.3-01 §5.2 / AC01,C,AC01,spec/ac.spec.ts,verified
+F4,导入,来源冲突进入人工核对队列，不自动择一,V2.3-04 §1 / AC08,C,AC08,spec/ac.spec.ts,verified
+G1,部署,第一版仅校内网络访问，地址与业务解耦,V2.3-01 §2.1,C,AC12,spec/ac.spec.ts,verified(引擎)
+G2,部署,校外不得直接访问，需实测拒绝并检查公网暴露,R05 §0.5 / AC12,C,AC12,spec/ac.spec.ts,verified(引擎) manual(实网)
+G3,兼容,鸿蒙PC/Windows/macOS(Safari)/鸿蒙·Android·iOS手机统一Web,V2.3-01 §2.1,C,,docs/decisions.csv#T01,manual
+G4,性能,约200教师；100混合并发/200集中读取为测试假设,V2.3-01 §7,C,,docs/decisions.csv#T08,manual
+G5,接口,版本化API/幂等键/乐观版本/按权限过滤,V2.3-04 §1,C,V23-12,spec/v23.spec.ts,verified(幂等)
+G6,审计,谁/何时/何对象/为何/前后版本/来源，不可抹除,V2.3-04 §1,C,AC14,spec/ac.spec.ts,verified
+G7,可靠,备份恢复须独立环境演练并核对,V2.3-04 必测14,C,,docs/decisions.csv#BIZ-10,manual
+G8,隐私,日志/错误页/消息不暴露请假细节，测试不用真实学生,V2.3-01 §7 / R05 §7,C,V23-13,spec/v23.spec.ts,verified(权限侧) manual(日志)
+G9,智能,基础运行不依赖AI,V2.3-01 §1,D,,docs/00_项目接手审查报告.md,constraint
+P2-1,课次,教师视角与班级视角对同一课次给出完全一致的结果,V2.3-01 §10,P2,,tests/store/views-consistency.spec.ts,verified(1000组)
+P2-2,课次,无法判定的日期与课次必须显式外露而非留空,V2.3-01 §3 / R05 §2,P2,,tests/service/timetable.spec.ts,verified
+P2-3,课次,轮换课不推算也不生成课次,V2.3-01 §10 / BIZ-06,P2,,tests/store/views-consistency.spec.ts,verified
+P2-4,课次,派生课次可由资料完整重建且不承载已生效事实,V2.3-04 §1,P2,,tests/store/views-consistency.spec.ts,verified
+P2-5,应急,应急登记只记录信息不改动课表,V2.3-04 必测7,P2,V23-07,tests/service/timetable.spec.ts,verified
