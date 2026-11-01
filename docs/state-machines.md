@@ -55,6 +55,10 @@ NOT_REQUESTED ──方案提交──> PENDING ──本人接受──> ACCEPT
 
 ## 3. 应急协调（Coordination）
 
+> **P6 受限实现说明**：门禁未关闭，只落地 `REQUESTED` 与"求助事实"。
+> `NOTIFIED` / `OWNED` / `AMBIGUOUS` / `CLOSURE_SUBMITTED` / `CLOSED` 的入口全部返回
+> `NOT_CONFIGURED`（附阻断项编号），不得由系统自动推进。
+
 ```
 REQUESTED ──送达──> NOTIFIED
    │                   │

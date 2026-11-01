@@ -1,5 +1,5 @@
 ﻿id,domain,requirement,source,tag,scenario,evidence,status
-A1,身份,账号由学校统一开通，禁止自由注册获得教师身份,V2.3-01 §2.2 / 02 决策清单,C,,docs/permission-matrix.md,planned(P2)
+A1,身份,账号由学校统一开通，禁止自由注册获得教师身份,V2.3-01 §2.2 / 02 决策清单,C,,docs/permission-matrix.md; tests/auth/auth.spec.ts,verified
 A2,身份,稳定教师ID，同名/改名/离职不混淆,V2.3-01 §3 / 02,C,V23-01,spec/v23.spec.ts,verified
 A3,权限,服务端逐操作逐资源校验，前端隐藏不算授权,V2.3-01 §2.2 /04 §1,C,V23-13,spec/v23.spec.ts,verified
 A4,权限,教师可看他人正常课表与已确认客观任务；私人理由不公开,V2.3-01 §2.2,C,V23-13,spec/ac.spec.ts#AC05,verified
@@ -17,37 +17,73 @@ C5,课次,备案课后服务不表述为当天实际占用,R05 §2 / AC13,C,AC13
 D1,调课,必要确认者由受影响集合计算,V2.3-01 §4 R01,C,V23-03,spec/v23.spec.ts,verified
 D2,调课,班主任不自动确认，生效后仅通知,V2.3-01 §4 R01,C,V23-03,spec/v23.spec.ts,verified
 D3,调课,确认绑定方案版本，改版后旧确认失效,V2.3-01 §4.1,C,AC06,spec/ac.spec.ts,verified
-D4,调课,全确认+冲突复核+版本校验后单事务整体生效,V2.3-01 §4.2,C,,docs/state-machines.md,planned(P4)
+D4,调课,全确认+冲突复核+版本校验后单事务整体生效,V2.3-01 §4.2,C,,docs/state-machines.md; tests/service/change.spec.ts,verified
 D5,调课,未回复/已读/拒绝/过期均不视为同意,V2.3-01 §4.4,C,AC03,spec/ac.spec.ts,verified
-D6,调课,生效后不可删除，取消须新方案并重新确认,V2.3-02 R02,C,,docs/state-machines.md,planned(P4)
+D6,调课,生效后不可删除，取消须新方案并重新确认,V2.3-02 R02,C,,docs/state-machines.md; tests/service/change.spec.ts,verified
 D7,调课,已执行课次不被恢复方案改写,V2.3-02 R02-A,C,V23-05,spec/v23.spec.ts,verified
 D8,调课,资料性纠错可免确认但白名单未定,V2.3-01 §4.6 / BIZ-01,C,AC07,spec/ac.spec.ts,verified(识别) blocked(白名单)
-E1,应急,求助/登记/本人接受/正式生效/实际执行五件事分离,V2.3-01 §5 / R05 §3,C,AC10,spec/ac.spec.ts,verified
-E2,应急,普通教师可求助；仅授权人员可登记临时安排,V2.3-01 §5.1,C,AC11,spec/ac.spec.ts,verified(接口) blocked(任职名单)
-E3,应急,口头接受可登记；本人补确认保留真实时间,V2.3-01 §5.2,C,AC05,spec/ac.spec.ts,verified
-E4,应急,补确认应在下一工作日结束前；逾期待核验,V2.3-02 R02-B3-1,C,,docs/decisions.csv#BIZ-04,blocked(截止钟点)
-E5,应急,应急责任组+当日主责+排班代理+最终兜底岗位,V2.3-01 §5.3,C,,docs/permission-matrix.md,blocked(岗位未定)
-E6,应急,主责明确拒绝立即升级代理并留痕,V2.3-02 O3,C,V23-09,spec/v23.spec.ts,verified
-E7,应急,先有效接单者为唯一当前负责人,V2.3-02 O2,C,V23-10,spec/v23.spec.ts,verified
-E8,应急,结案与授课事实核验分离,V2.3-02 R02-B4-2,C,V23-11,spec/v23.spec.ts,verified
-E9,应急,结案须记录结果/经过/责任人/时间/联系记录,V2.3-02 R02-B4-7,C,,docs/state-machines.md,planned(P6)
-E10,应急,口头协调接单可临时显示，本人事后追认,V2.3-02 O1,C,,docs/decisions.csv#O5,blocked(追认期限)
-E11,应急,校外求助经人工沟通+校内代录，代录不代确认,R05 §0.5 / AC11,C,AC11,spec/ac.spec.ts,verified
-F1,导入,上传-映射-校验-预览-提交，失败不污染正式数据,V2.3-01 §3 /04 §1,C,,docs/decisions.csv#S01,planned(P3)
+E1,应急,求助/登记/本人接受/正式生效/实际执行五件事分离,V2.3-01 §5 / R05 §3,C,AC10,spec/ac.spec.ts; tests/domain/emergency.spec.ts,verified(领域)
+E2,应急,普通教师可求助；仅授权人员可登记临时安排,V2.3-01 §5.1,C,AC11,spec/ac.spec.ts; tests/service/emergency.spec.ts,verified(求助) blocked(登记任职名单)
+E3,应急,口头接受可登记；本人补确认保留真实时间,V2.3-01 §5.2,C,AC05,spec/ac.spec.ts; tests/domain/emergency.spec.ts,verified(领域) blocked(登记入口)
+E4,应急,补确认应在下一工作日结束前；逾期待核验,V2.3-02 R02-B3-1,C,,docs/decisions.csv#BIZ-04; tests/domain/emergency.spec.ts,blocked(截止钟点)
+E5,应急,应急责任组+当日主责+排班代理+最终兜底岗位,V2.3-01 §5.3,C,,docs/permission-matrix.md; tests/domain/emergency.spec.ts,blocked(岗位未定)
+E6,应急,主责明确拒绝立即升级代理并留痕,V2.3-02 O3,C,V23-09,spec/v23.spec.ts; tests/domain/emergency.spec.ts,verified(领域) blocked(代理岗位)
+E7,应急,先有效接单者为唯一当前负责人,V2.3-02 O2,C,V23-10,spec/v23.spec.ts; tests/domain/emergency.spec.ts,verified(领域) blocked(候选人范围)
+E8,应急,结案与授课事实核验分离,V2.3-02 R02-B4-2,C,V23-11,spec/v23.spec.ts; tests/domain/emergency.spec.ts,verified(领域) blocked(结案确认人)
+E9,应急,结案须记录结果/经过/责任人/时间/联系记录,V2.3-02 R02-B4-7,C,,docs/state-machines.md; tests/domain/emergency.spec.ts,verified(校验) blocked(结案入口)
+E10,应急,口头协调接单可临时显示，本人事后追认,V2.3-02 O1,C,,docs/decisions.csv#O5; tests/domain/emergency.spec.ts,blocked(追认期限)
+E11,应急,校外求助经人工沟通+校内代录，代录不代确认,R05 §0.5 / AC11,C,AC11,spec/ac.spec.ts; tests/domain/emergency.spec.ts,verified(领域) blocked(代录入口)
+F1,导入,上传-映射-校验-预览-提交，失败不污染正式数据,V2.3-01 §3 /04 §1,C,,docs/decisions.csv#S01; tests/import/pipeline.spec.ts,verified
 F2,导入,重复文件与行序变化不重复生成课务,V2.3-04 必测12,C,V23-12,spec/v23.spec.ts,verified(变更侧)
 F3,导入,导入文件不等于学校正式发布,V2.3-01 §5.2 / AC01,C,AC01,spec/ac.spec.ts,verified
 F4,导入,来源冲突进入人工核对队列，不自动择一,V2.3-04 §1 / AC08,C,AC08,spec/ac.spec.ts,verified
-G1,部署,第一版仅校内网络访问，地址与业务解耦,V2.3-01 §2.1,C,AC12,spec/ac.spec.ts,verified(引擎)
-G2,部署,校外不得直接访问，需实测拒绝并检查公网暴露,R05 §0.5 / AC12,C,AC12,spec/ac.spec.ts,verified(引擎) manual(实网)
+G1,部署,第一版仅校内网络访问，地址与业务解耦,V2.3-01 §2.1,C,AC12,src/server/config.ts; tests/server/http.spec.ts,verified(配置)
+G2,部署,校外不得直接访问，需实测拒绝并检查公网暴露,R05 §0.5 / AC12,C,AC12,spec/ac.spec.ts; tests/server/http.spec.ts,verified(配置) NOT_RUN(实网)
 G3,兼容,鸿蒙PC/Windows/macOS(Safari)/鸿蒙·Android·iOS手机统一Web,V2.3-01 §2.1,C,,docs/decisions.csv#T01,manual
 G4,性能,约200教师；100混合并发/200集中读取为测试假设,V2.3-01 §7,C,,docs/decisions.csv#T08,manual
 G5,接口,版本化API/幂等键/乐观版本/按权限过滤,V2.3-04 §1,C,V23-12,spec/v23.spec.ts,verified(幂等)
-G6,审计,谁/何时/何对象/为何/前后版本/来源，不可抹除,V2.3-04 §1,C,AC14,spec/ac.spec.ts,verified
-G7,可靠,备份恢复须独立环境演练并核对,V2.3-04 必测14,C,,docs/decisions.csv#BIZ-10,manual
-G8,隐私,日志/错误页/消息不暴露请假细节，测试不用真实学生,V2.3-01 §7 / R05 §7,C,V23-13,spec/v23.spec.ts,verified(权限侧) manual(日志)
+G6,审计,谁/何时/何对象/为何/前后版本/来源，不可抹除,V2.3-04 §1,C,AC14,tests/store/audit.spec.ts; tests/boundary.spec.ts,verified
+G7,可靠,备份恢复须独立环境演练并核对,V2.3-04 必测14,C,,tests/backup/backup.spec.ts; scripts/smoke-deploy.sh,verified(小数据) NOT_RUN(真实规模)
+G8,隐私,日志/错误页/消息不暴露请假细节，测试不用真实学生,V2.3-01 §7 / R05 §7,C,V23-13,tests/log/logger.spec.ts; tests/boundary.spec.ts,verified
 G9,智能,基础运行不依赖AI,V2.3-01 §1,D,,docs/00_项目接手审查报告.md,constraint
 P2-1,课次,教师视角与班级视角对同一课次给出完全一致的结果,V2.3-01 §10,P2,,tests/store/views-consistency.spec.ts,verified(1000组)
 P2-2,课次,无法判定的日期与课次必须显式外露而非留空,V2.3-01 §3 / R05 §2,P2,,tests/service/timetable.spec.ts,verified
 P2-3,课次,轮换课不推算也不生成课次,V2.3-01 §10 / BIZ-06,P2,,tests/store/views-consistency.spec.ts,verified
 P2-4,课次,派生课次可由资料完整重建且不承载已生效事实,V2.3-04 §1,P2,,tests/store/views-consistency.spec.ts,verified
 P2-5,应急,应急登记只记录信息不改动课表,V2.3-04 必测7,P2,V23-07,tests/service/timetable.spec.ts,verified
+P3-1,导入,同一文件重复上传不产生重复课务,V2.3-04 必测12,P3,,tests/import/pipeline.spec.ts,verified
+P3-2,导入,行序变化不影响差异结论,R05 §4,P3,,tests/import/pipeline.spec.ts,verified
+P3-3,导入,含非法行整批拒绝且正式数据不变,AC08,P3,AC08,tests/import/pipeline.spec.ts,verified
+P3-4,导入,上传不等于正式发布,AC01,P3,AC01,tests/import/pipeline.spec.ts,verified
+P3-5,导入,撤销批次不删除已生效数据,AC08,P3,AC08,tests/import/pipeline.spec.ts,verified
+P3-6,导入,不支持格式明确拒绝不静默失败,R05 §4,P3,,tests/import/parse.spec.ts,verified
+P3-7,导入,导入数据来源标记与模拟数据隔离,CFG-08,P3,,tests/import/pipeline.spec.ts,verified
+P4-1,变更,必要确认者由责任变化计算并在提交时固化,V2.3-01 §4.2,P4,V23-03,tests/service/change.spec.ts,verified
+P4-2,变更,沉默已读与旧版本确认均不生效,V2.3-01 §4.4,P4,AC03;AC06,tests/service/change.spec.ts,verified
+P4-3,变更,并发互斥方案仅一个生效且审计同事务,R05 AC14,P4,AC14,tests/service/change.spec.ts,verified
+P4-4,变更,同一幂等键只产生一次变更,R05 AC13,P4,AC13,tests/service/change.spec.ts,verified
+P4-5,变更,生效后不可删除取消须新建恢复方案,V2.3-02 R02,P4,,tests/service/change.spec.ts,verified
+P4-6,变更,恢复只作用于未执行课次,V2.3-02 R02-A,P4,V23-05,tests/service/change.spec.ts,verified
+P4-7,变更,改变责任的纠错一律走新方案,V2.3-01 §4.6,P4,AC07,tests/domain/change.spec.ts,verified(识别)
+P5-1,部署,只允许绑定回环或私有地址，通配与公网地址拒绝启动,AC12 / T-01,P5,AC12,tests/server/http.spec.ts,verified
+P5-2,部署,身份只由会话签发，请求体身份字段一律不采信,R-25,P5,,tests/server/http.spec.ts; tests/boundary.spec.ts,verified
+P5-3,部署,首登未改密时除改密与登出外一律拒绝,P5,,,tests/auth/auth.spec.ts,verified
+P5-4,部署,备份可校验可恢复，恢复前后逐项对账,AC14,P5,AC14,tests/backup/backup.spec.ts; scripts/smoke-deploy.sh,verified(小数据)
+P5-5,部署,日志只写白名单字段且手机号脱敏,R05 §7,P5,,tests/log/logger.spec.ts,verified
+P5-6,部署,畸形请求返回 400 且不产生业务副作用,docs/02_规则分层与配置化设计.md#L0,P5,,tests/server/http.spec.ts,verified
+P5-7,部署,审计 append-only 且哈希链可发现改行删行换序,V2.3-04 §1,P5,AC14,tests/store/audit.spec.ts,verified
+P5-8,部署,写接口必须带幂等键且空键不参与去重,R05 AC13,P5,AC13,tests/server/http.spec.ts; tests/service/change.spec.ts,verified
+P6-1,应急,求助只能针对本人当前承担的课次,V2.3-01 §5.1,P6,,tests/service/emergency.spec.ts,verified
+P6-2,应急,求助不产生通知/负责人/结案/授课核验,V2.3-01 §5.1 / INV-04,P6,AC04,tests/service/emergency.spec.ts; tests/domain/emergency.spec.ts,verified
+P6-3,应急,未决操作返回 NOT_CONFIGURED 并留审计,E5/D07/O2-1/BIZ-05,P6,,tests/service/emergency.spec.ts,verified
+P6-4,应急,口头登记/接单/结案/执行事实入口全部阻断,D06/D07/BIZ-03/BIZ-05,P6,,tests/service/emergency.spec.ts,verified
+P6-5,应急,求助说明不进审计链,R05 §7,P6,,tests/service/emergency.spec.ts,verified
+P6-6,应急,求助只对求助人可见,V2.3-01 §2.2,P6,AC05,tests/service/emergency.spec.ts; tests/server/http.spec.ts,verified
+P7A-1,界面,未登录只能读取登录接口与白名单静态资源,R05 §0.5 / INV-12,P7A,AC12,tests/server/read-api.spec.ts,verified
+P7A-2,界面,方案理由字段只对发起人返回,V2.3-01 §2.2 / permission-matrix,P7A,AC05,tests/server/read-api.spec.ts,verified
+P7A-3,界面,方案列表只返回我发起或等我确认的条目,V2.3-01 §2.2,P7A,,tests/server/read-api.spec.ts,verified
+P7A-4,界面,页面不引用外部资源且不含内联脚本与样式,V2.3-01 §2.1,P7A,,tests/ui/page.spec.ts,verified
+P7A-5,界面,静态资源按白名单提供且不可穿越目录,V2.3-01 §2.1,P7A,AC12,tests/server/read-api.spec.ts,verified
+P7A-6,界面,调课生效后教师与班级课表立即反映新归属,V2.3-01 §4.2,P7A,,tests/store/timetable-overlay.spec.ts; scripts/smoke-ui.ts,verified
+P7A-7,界面,待校方确认的职责在界面显示为禁用并说明原因,permission-matrix §5,P7A,,tests/server/read-api.spec.ts; scripts/smoke-ui.ts,verified
+P7A-8,界面,真实浏览器与移动端实机主路径验证,V2.3-01 §2.1,P7A,,docs/reports/P7A-报告.md,not_run

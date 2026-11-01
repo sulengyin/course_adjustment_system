@@ -124,23 +124,6 @@ export class TimetableService {
       reason: plan.unknownReason,
     };
   }
-
-  /** V2.3 必测 7：应急登记只记录信息，不改动课表 */
-  recordEmergencyNote(note: {
-    id: string;
-    termId: string;
-    date: string;
-    period: number;
-    classId: string;
-    note: string;
-    recordedBy: string;
-    recordedAt: string;
-  }): { timetableUnchanged: boolean } {
-    const before = this.db.occurrenceFingerprint(note.termId);
-    this.db.insertEmergencyNote(note);
-    const after = this.db.occurrenceFingerprint(note.termId);
-    return { timetableUnchanged: before === after };
-  }
 }
 
 /** 便于测试与演示：把课次转成稳定字符串，用于比较两个视图是否一致 */

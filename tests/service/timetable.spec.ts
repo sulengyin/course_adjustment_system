@@ -100,7 +100,8 @@ describe('只读课表（虚构样本）', () => {
   it('V2.3 必测 7：应急登记不改动课表', () => {
     service.build(TERM, FROM, TO);
     const before = db.occurrenceFingerprint(TERM);
-    const result = service.recordEmergencyNote({
+    // 记录本身是存储层事实；"谁有权登记"由 P6 的权限矩阵决定（当前 R 角色 TBD_BLOCKED）。
+    db.insertEmergencyNote({
       id: 'NOTE-1',
       termId: TERM,
       date: '2026-09-07',
@@ -110,7 +111,6 @@ describe('只读课表（虚构样本）', () => {
       recordedBy: 'U-COORD',
       recordedAt: '2026-09-07T07:30:00Z',
     });
-    expect(result.timetableUnchanged).toBe(true);
     expect(db.countEmergencyNotes()).toBe(1);
     expect(db.occurrenceFingerprint(TERM)).toBe(before);
 
