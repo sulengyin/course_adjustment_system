@@ -1,34 +1,75 @@
 /* 纯内网部署：不引用任何外部字体、图标与 CDN 资源。 */
 
 :root {
-  --bg: #f5f6f8;
+  /* 主色：通透蓝。只用同色相的深浅，不引入第二个色相——轻盈靠留白与光，不靠颜色多。 */
+  --brand: #2f7fd1;
+  --brand-strong: #2a6fb8;
+  --brand-soft: #57a0e2;
+  --brand-weak: #eaf3fb;
+  --brand-ring: rgba(47, 127, 209, 0.20);
+
+  --bg: #f4f7fa;
   --surface: #ffffff;
-  --line: #dfe3e8;
-  --line-strong: #c3cad3;
-  --text: #1c2530;
-  --muted: #5d6a7a;
-  --brand: #1f5f8b;
-  --brand-weak: #e6eff6;
+  --line: #e6ebf1;
+  --line-strong: #d3dbe5;
+  --text: #1b2733;
+  --muted: #5f6d7e;
+
   --ok: #1c6b3f;
-  --ok-weak: #e4f3e9;
+  --ok-weak: #e7f5ec;
   --warn: #8a5a00;
-  --warn-weak: #fdf2dc;
+  --warn-weak: #fdf5e4;
   --danger: #a12a2a;
-  --danger-weak: #fbe7e7;
-  --radius: 10px;
-  --shadow: 0 1px 2px rgba(20, 30, 45, 0.06), 0 6px 18px rgba(20, 30, 45, 0.05);
+  --danger-weak: #fcecec;
+
+  --radius-sm: 10px;
+  --radius: 12px;
+  --radius-lg: 14px;
+  --radius-pill: 999px;
+
+  /* 阴影分三级：静止几乎看不见 → 悬停抬升 → 浮层更远。全部低透明度多层，不做硬黑边。 */
+  --shadow: 0 1px 2px rgba(20, 35, 60, 0.05);
+  --shadow-1: 0 1px 2px rgba(20, 35, 60, 0.05);
+  --shadow-2: 0 2px 6px rgba(20, 35, 60, 0.07), 0 10px 22px rgba(20, 35, 60, 0.06);
+  --shadow-3: 0 10px 30px rgba(20, 35, 60, 0.14), 0 2px 6px rgba(20, 35, 60, 0.07);
+  --shadow-brand: 0 1px 2px rgba(47, 127, 209, 0.35), 0 6px 16px rgba(47, 127, 209, 0.20);
+
+  /* 动效：统一时长与曲线，避免各写各的 */
+  --t-fast: 140ms;
+  --t: 190ms;
+  --ease: cubic-bezier(0.2, 0.7, 0.3, 1);
 }
 
 * { box-sizing: border-box; }
 
+/* 焦点：键盘看得见、鼠标不打扰。环由内向外铺开，是"呼吸感"的主要来源。 */
+:where(a, button, input, select, textarea, summary, [tabindex]):focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 1px var(--brand), 0 0 0 4px var(--brand-ring);
+}
+
+/* 系统要求减少动态效果时：只留颜色变化，不做位移与呼吸。 */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
 html, body {
   margin: 0;
   padding: 0;
-  background: var(--bg);
   color: var(--text);
   font-family: "Noto Sans SC", "Source Han Sans SC", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
   font-size: 14px;
-  line-height: 1.55;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
+/* 顶部一段极淡的天光，落到底色后消失：不抢内容，只让页面不"死板" */
+body {
+  background: linear-gradient(180deg, #f2f8fd 0, var(--bg) 260px) no-repeat, var(--bg);
+  min-height: 100vh;
 }
 
 .boot { padding: 48px; text-align: center; color: var(--muted); }
@@ -160,30 +201,73 @@ details > summary { cursor: pointer; font-weight: 600; }
 
 button.btn {
   font: inherit;
-  padding: 7px 12px;
-  border-radius: 8px;
+  padding: 8px 14px;
+  border-radius: var(--radius-sm);
   border: 1px solid var(--line-strong);
   background: #fff;
   color: var(--text);
   cursor: pointer;
+  transition: transform var(--t-fast) var(--ease), box-shadow var(--t) var(--ease),
+    border-color var(--t) var(--ease), background-color var(--t) var(--ease), color var(--t) var(--ease);
 }
-button.btn:hover { border-color: var(--brand); }
-button.btn:disabled { opacity: 0.55; cursor: not-allowed; }
-button.btn.primary { background: var(--brand); border-color: var(--brand); color: #fff; }
-button.btn.ok { background: var(--ok); border-color: var(--ok); color: #fff; }
-button.btn.danger { color: var(--danger); border-color: #e0b4b4; }
-button.btn.ghost { border-color: transparent; background: transparent; color: var(--brand); padding: 4px 6px; }
+button.btn:hover {
+  border-color: var(--brand-soft);
+  box-shadow: var(--shadow-1);
+  transform: translateY(-1px);
+}
+button.btn:active { transform: translateY(0); box-shadow: none; }
+button.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+}
+button.btn.primary {
+  background: linear-gradient(180deg, #3d8ade, var(--brand));
+  border-color: transparent;
+  color: #fff;
+  box-shadow: var(--shadow-brand);
+}
+button.btn.primary:hover {
+  background: linear-gradient(180deg, #4491e4, #2c78c8);
+  box-shadow: 0 2px 4px rgba(47, 127, 209, 0.32), 0 10px 22px rgba(47, 127, 209, 0.24);
+}
+/* primary 自带阴影，焦点环要显式补上，否则会被自带阴影盖掉 */
+button.btn.primary:focus-visible {
+  box-shadow: var(--shadow-brand), 0 0 0 1px var(--brand), 0 0 0 4px var(--brand-ring);
+}
+button.btn.ok {
+  background: linear-gradient(180deg, #24834f, var(--ok));
+  border-color: transparent;
+  color: #fff;
+}
+button.btn.danger { color: var(--danger); border-color: #e6bcbc; }
+button.btn.danger:hover { background: var(--danger-weak); border-color: #dda9a9; }
+button.btn.ghost {
+  border-color: transparent;
+  background: transparent;
+  color: var(--brand);
+  padding: 6px 8px;
+}
+button.btn.ghost:hover {
+  background: var(--brand-weak);
+  border-color: transparent;
+  box-shadow: none;
+  transform: none;
+}
 
 input, select, textarea {
   font: inherit;
-  padding: 7px 9px;
+  padding: 8px 11px;
   border: 1px solid var(--line-strong);
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   background: #fff;
   color: var(--text);
   min-width: 0;
+  transition: border-color var(--t) var(--ease), box-shadow var(--t) var(--ease);
 }
-textarea { width: 100%; min-height: 76px; resize: vertical; }
+input:hover, select:hover, textarea:hover { border-color: var(--brand-soft); }
+textarea { width: 100%; min-height: 84px; resize: vertical; }
 .field { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--muted); }
 .field > span { font-weight: 600; color: var(--text); }
 
