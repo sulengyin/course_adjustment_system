@@ -184,7 +184,19 @@ body {
   text-align: center;
 }
 
-main { flex: 1; padding: 22px 24px 8px; max-width: 1160px; width: 100%; margin: 0 auto; }
+/* 切页时内容淡入上移 6px：足够被感知，又不会让人等它动完 */
+main {
+  flex: 1;
+  padding: 22px 24px 8px;
+  max-width: 1160px;
+  width: 100%;
+  margin: 0 auto;
+  animation: page-in var(--t) var(--ease) both;
+}
+@keyframes page-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: none; }
+}
 
 /* 页头：各页标题统一节奏（标题 + 徽标 + 一句说明）。 */
 .page-head { margin: 0 0 14px; }
@@ -408,46 +420,67 @@ textarea { width: 100%; min-height: 84px; resize: vertical; }
 .login .msg.error { color: var(--danger); }
 
 /* ---------- 课表 ---------- */
-.board { width: 100%; border-collapse: separate; border-spacing: 6px; table-layout: fixed; }
+/* 格子之间留 8px 空隙，靠空隙分层而不是靠边框，看起来更轻。 */
+.board { width: 100%; border-collapse: separate; border-spacing: 8px; table-layout: fixed; }
 .board th {
   font-size: 12px;
   color: var(--muted);
   font-weight: 600;
-  padding: 4px 2px;
+  padding: 6px 2px;
   text-align: center;
 }
-.board th .date { display: block; font-weight: 400; font-size: 11px; }
+.board th .date { display: block; font-weight: 400; font-size: 11px; margin-top: 1px; }
 .board .period-head { width: 52px; }
 .board td { vertical-align: top; padding: 0; }
+.board td.is-today {
+  background: rgba(47, 127, 209, 0.05);
+  border-radius: var(--radius);
+}
+.board th.is-today { color: var(--brand-strong); }
+.board th.is-today .date { color: var(--brand); font-weight: 600; }
 .board .period {
   width: 52px;
   text-align: center;
   color: var(--muted);
   font-size: 12px;
-  padding-top: 10px;
+  padding-top: 12px;
 }
 .slot {
   border: 1px solid var(--line);
-  border-radius: 8px;
-  padding: 7px 8px;
-  min-height: 58px;
+  border-radius: var(--radius);
+  padding: 9px 10px;
+  min-height: 62px;
   background: #fff;
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: 4px;
   cursor: pointer;
   text-align: left;
   width: 100%;
   font: inherit;
   color: inherit;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9);
+  transition: transform var(--t-fast) var(--ease), box-shadow var(--t) var(--ease),
+    border-color var(--t) var(--ease);
 }
-.slot:hover { border-color: var(--brand); }
-.slot.empty { cursor: default; background: transparent; border-style: dashed; }
-.slot.empty:hover { border-color: var(--line); }
+.slot:hover {
+  border-color: rgba(47, 127, 209, 0.4);
+  box-shadow: var(--shadow-2);
+  transform: translateY(-1px);
+}
+.slot.empty {
+  cursor: default;
+  background: transparent;
+  border-style: dashed;
+  border-color: var(--line-strong);
+  opacity: 0.7;
+  box-shadow: none;
+}
+.slot.empty:hover { border-color: var(--line-strong); transform: none; box-shadow: none; }
 .slot .subject { font-weight: 600; font-size: 13px; }
 .slot .meta { color: var(--muted); font-size: 12px; }
 .slot .tags { display: flex; gap: 4px; flex-wrap: wrap; margin-top: 2px; }
-.slot.is-unknown { border-left: 3px solid var(--warn); }
+.slot.is-unknown { border-left: 3px solid #d19a2a; }
 .slot.is-cancelled { opacity: 0.62; }
 .slot.is-cancelled .subject { text-decoration: line-through; }
 
@@ -595,8 +628,22 @@ table.data td.mono, .mono { font-family: ui-monospace, "SFMono-Regular", Menlo, 
 @media (max-width: 780px) {
   main { padding: 12px; }
   .grid-2, .grid-3 { grid-template-columns: 1fr; }
-  .board { border-spacing: 3px; }
-  .slot { padding: 6px; min-height: 48px; }
+  .board { border-spacing: 4px; }
+  .slot { padding: 7px; min-height: 50px; }
   .slot .meta { font-size: 11px; }
   .kv { grid-template-columns: 100px 1fr; }
+}
+
+/* 窄屏（手机）：顶栏换行、页签与按钮可以整行、表格允许横向滚动 */
+@media (max-width: 480px) {
+  .topbar { flex-wrap: wrap; gap: 10px; padding: 12px 14px; }
+  .topbar .who { width: 100%; justify-content: flex-end; }
+  .nav { padding: 8px 14px 0; }
+  main { padding: 10px 12px 4px; }
+  .card { padding: 14px; margin-bottom: 14px; }
+  .tabs { display: flex; width: 100%; }
+  .tabs button { flex: 1; text-align: center; }
+  .row > .btn { flex: 1 1 auto; }
+  .kv { grid-template-columns: 1fr; gap: 4px 0; }
+  .kv dt { margin-top: 6px; }
 }

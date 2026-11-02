@@ -494,6 +494,31 @@ describe('页面渲染（最小 DOM）', () => {
     expect(text).toContain('待我确认');
   });
 
+  it('课表标出今日列：用服务端时间判断，周六周日不在五天表头里就不标', async () => {
+    const today = new Date();
+    const term = {
+      id: 'TERM-WIDE',
+      label: '宽范围学期',
+      startMonday: '2000-01-03',
+      endDate: '2099-12-31',
+      dataOrigin: 'SIMULATED',
+    };
+    const harness = createHarness(
+      {
+        '/api/me': { ok: true, principal: PRINCIPAL },
+        '/api/meta': { ...META, terms: [term], serverTime: today.toISOString() },
+        '/api/timetable/me': { ...VIEW, view: { ...VIEW.view, rows: [] } },
+        '/api/changes/mine': { ok: true, submitted: [], awaiting: [] },
+      },
+      'token-1',
+    );
+    await harness.flush();
+    const app = harness.document.getElementById('app') as FakeNode;
+    const marked = findAllTag(app, 'th').filter((n) => n.className.split(' ').includes('is-today'));
+    const weekday = today.getDay();
+    expect(marked.length).toBe(weekday >= 1 && weekday <= 5 ? 1 : 0);
+  });
+
   it('调课对象是页面内可滚动名单，不依赖浏览器原生下拉弹层', async () => {
     const harness = createHarness(
       {

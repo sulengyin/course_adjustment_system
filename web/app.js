@@ -722,8 +722,17 @@ function shiftWeek(delta) {
   renderSectionRefresh();
 }
 
+/** 今天：优先用服务端时间，避免老师电脑时钟不准导致高亮错列。 */
+function todayIso() {
+  const raw = state.meta?.serverTime;
+  const parsed = typeof raw === 'string' ? new Date(raw) : null;
+  const d = parsed && !Number.isNaN(parsed.getTime()) ? parsed : new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
 function renderBoard(rows, from) {
   const dates = WEEKDAYS.map((_, i) => addDays(from, i));
+  const today = todayIso();
   const periods = [...new Set(rows.map((r) => r.period))].sort((a, b) => a - b);
   const maxPeriod = periods.length > 0 ? Math.max(...periods) : 8;
   const list = [];
@@ -733,7 +742,14 @@ function renderBoard(rows, from) {
     'tr',
     {},
     el('th', { class: 'period-head' }, '节次'),
-    ...dates.map((d, i) => el('th', {}, WEEKDAYS[i], el('span', { class: 'date' }, fmtDate(d)))),
+    ...dates.map((d, i) =>
+      el(
+        'th',
+        d === today ? { class: 'is-today' } : {},
+        WEEKDAYS[i],
+        el('span', { class: 'date' }, fmtDate(d)),
+      ),
+    ),
   );
 
   const body = el('tbody');
@@ -741,7 +757,7 @@ function renderBoard(rows, from) {
     const tr = el('tr');
     tr.append(el('td', { class: 'period' }, `第${period}节`));
     for (const date of dates) {
-      const cell = el('td');
+      const cell = el('td', date === today ? { class: 'is-today' } : {});
       const items = rows.filter((r) => r.date === date && r.period === period);
       if (items.length === 0) {
         cell.append(el('div', { class: 'slot empty' }));
