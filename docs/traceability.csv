@@ -118,3 +118,9 @@ P7E-5,作息,真实作息标记 IMPORTED_UNVERIFIED 并留 IMPORT_TERM 审计,do
 P7E-6,作息,大课间与眼保健操及午餐与课后服务时段不入 bell,docs/09 §2,P7E,,scripts/import-bell.ts,verified
 P7E-7,教师档案,教师名单遗漏的在校教师可由课务补录，编号系统生成并标待正式工号,docs/09 §7,P7E,,scripts/import-teachers.ts,verified
 P7E-8,教师档案,课表姓名与档案不一致时按档案纠正且纠正须留痕,docs/09 §7,P7E,,docs/09 §7,verified
+P7F-1,权限,角色互不蕴含，追加角色只增加可切换身份不合并权限,docs/10 §1,P7F,,tests/auth/auth.spec.ts,verified
+P7F-2,权限,账号有多个角色时登录必须显式选择身份，否则返回 AMBIGUOUS_ROLE,docs/10 §3,P7F,,tests/auth/auth.spec.ts,verified
+P7F-3,权限,切换身份后旧会话立即失效并写 SWITCH_ROLE 审计,docs/10 §3,P7F,,tests/auth/auth.spec.ts / tests/server/http.spec.ts,verified
+P7F-4,权限,不能切换到未授予自己的角色,docs/10 §3,P7F,,tests/auth/auth.spec.ts,verified
+P7F-5,权限,不可授予角色 C/R/J 与无教师档案的 T 一律拒绝,docs/10 §2,P7F,,scripts/grant-role.ts,verified
+P7F-6,权限,管理员身份即使追加 S 也不能确认他人课务或代发起调课,docs/10 §4,P7F,,tests/auth/auth.spec.ts,verified

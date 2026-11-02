@@ -450,6 +450,29 @@ function logoutLocal() {
   state.weekStart = null;
 }
 
+/**
+ * 切换当前会话身份。服务端会作废旧会话并签发新令牌，
+ * 因此必须立刻替换本地 token，否则接下来的请求都按"会话失效"处理。
+ */
+async function switchIdentity(role) {
+  if (!state.principal || role === state.principal.actingRole) return;
+  try {
+    const res = await api('/api/auth/switch-role', { method: 'POST', body: { actingRole: role } });
+    if (!res.ok) {
+      toast(res.data.message || '身份切换失败', true);
+      return;
+    }
+    saveToken(res.data.token);
+    state.principal = res.data.principal;
+    await loadMeta();
+    toast(`已切换为${ROLE_LABEL[role] ?? role}`);
+    go('access');
+  } catch (error) {
+    if (String(error?.message) === 'UNAUTHENTICATED') return;
+    toast(`身份切换失败：${error?.message ?? error}`, true);
+  }
+}
+
 function renderShell() {
   clear(app);
   const p = state.principal;
@@ -478,6 +501,26 @@ function renderShell() {
     );
   }
 
+  // 一人多角色：换身份不等于换人。旧会话作废、新会话签发，审计里记 SWITCH_ROLE。
+  const roleSelect =
+    p.roles.length > 1
+      ? el(
+          'select',
+          {
+            class: 'role-select',
+            title: '切换身份（同一账号的多重职责，不是换人）',
+            onchange: (event) => {
+              const next = event.target.value;
+              event.target.value = p.actingRole;
+              switchIdentity(next);
+            },
+          },
+          ...p.roles.map((role) =>
+            el('option', { value: role, selected: role === p.actingRole }, ROLE_LABEL[role] ?? role),
+          ),
+        )
+      : null;
+
   const header = el(
     'header',
     { class: 'topbar' },
@@ -487,7 +530,9 @@ function renderShell() {
     el(
       'div',
       { class: 'who' },
-      el('span', {}, `${p.displayName}　${ROLE_LABEL[p.actingRole] ?? p.actingRole}`),
+      el('span', {}, `${p.displayName}${roleSelect ? '' : `　${ROLE_LABEL[p.actingRole] ?? p.actingRole}`}`),
+      roleSelect,
+
       el('button', { class: 'btn ghost', type: 'button', onclick: () => renderChangePassword(false) }, '改密'),
       el(
         'button',

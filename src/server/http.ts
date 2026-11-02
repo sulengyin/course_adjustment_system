@@ -256,6 +256,25 @@ export function createHandler(deps: AppDeps): RequestListener {
       return;
     }
 
+    // 身份切换：一人多角色时换身份不等于换人。旧会话当场作废、签发新会话，
+    // 两件事都写审计（SWITCH_ROLE），因此审计里始终能看出"那一刻是以什么身份在操作"。
+    if (path === '/api/auth/switch-role' && method === 'POST') {
+      const body = await readJson(req);
+      if (!body) return fail(res, 400, 'BAD_INPUT');
+      const actingRole = typeof body.actingRole === 'string' ? body.actingRole : '';
+      try {
+        const next = deps.auth.switchRole(principal, actingRole);
+        send(res, 200, { ok: true, token: next.token, principal: publicPrincipal(next.principal) });
+      } catch (error) {
+        if (error instanceof AuthError) {
+          fail(res, error.code === 'ROLE_NOT_GRANTED' ? 403 : 400, error.code, error.message);
+          return;
+        }
+        throw error;
+      }
+      return;
+    }
+
     if (path === '/api/me' && method === 'GET') {
       send(res, 200, { ok: true, principal: publicPrincipal(principal) });
       return;

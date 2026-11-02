@@ -325,3 +325,59 @@ describe('初始口令生成', () => {
     }
   });
 });
+
+describe('一人多角色与身份切换', () => {
+  it('追加第二个角色后，登录必须显式选身份，不能默认挑一个', () => {
+    const h = harness();
+    h.auth.grantRole(h.admin, h.admin.userId, 'S');
+
+    const ambiguous = h.auth.login('admin', KNOWN);
+    expect(ambiguous.ok).toBe(false);
+    if (!ambiguous.ok) expect(ambiguous.code).toBe('AMBIGUOUS_ROLE');
+
+    const asAdmin = h.auth.login('admin', KNOWN, 'A');
+    expect(asAdmin.ok).toBe(true);
+  });
+
+  it('切换身份作废旧会话、签发新会话，并留下 SWITCH_ROLE 审计', () => {
+    const h = harness();
+    h.auth.grantRole(h.admin, h.admin.userId, 'S');
+    const asAdmin = h.auth.login('admin', KNOWN, 'A');
+    if (!asAdmin.ok) throw new Error('login failed');
+
+    const switched = h.auth.switchRole(asAdmin.principal, 'S');
+
+    expect(switched.principal.actingRole).toBe('S');
+    expect(switched.principal.roles).toEqual(['A', 'S']);
+    expect(h.auth.authenticate(asAdmin.token)).toBeNull();
+    expect(h.auth.authenticate(switched.token)?.actingRole).toBe('S');
+
+    const rows = h.db.handle
+      .prepare("SELECT actor, object_id, before_state, after_state FROM audit_event WHERE action = 'SWITCH_ROLE'")
+      .all() as Array<{ actor: string; object_id: string; before_state: string; after_state: string }>;
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.actor).toBe(h.admin.userId);
+    expect(rows[0]?.object_id).toBe(h.admin.userId);
+    expect(rows[0]?.before_state).toBe('A');
+    expect(rows[0]?.after_state).toBe('S');
+  });
+
+  it('不能切换到未授予自己的角色', () => {
+    const h = harness();
+    const staff = addUser(h, { loginName: 'staffx', roles: ['S'] });
+    expect(() => h.auth.switchRole(staff, 'A')).toThrow(/未授予该角色/);
+    expect(() => h.auth.switchRole(staff, 'T')).toThrow(/未授予该角色/);
+  });
+
+  it('追加角色不改判权限：A+S 的 A 身份依然不能导入', () => {
+    const h = harness();
+    h.auth.grantRole(h.admin, h.admin.userId, 'S');
+    const asAdmin = h.auth.login('admin', KNOWN, 'A');
+    const asStaff = h.auth.login('admin', KNOWN, 'S');
+    if (!asAdmin.ok || !asStaff.ok) throw new Error('login failed');
+
+    expect(() => h.auth.requireAction(asAdmin.principal, 'IMPORT_TIMETABLE')).toThrow(/无权执行/);
+    expect(() => h.auth.requireAction(asStaff.principal, 'IMPORT_TIMETABLE')).not.toThrow();
+    expect(() => h.auth.requireAction(asStaff.principal, 'MANAGE_ACCOUNTS')).toThrow(/无权执行/);
+  });
+});

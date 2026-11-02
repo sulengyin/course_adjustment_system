@@ -390,3 +390,43 @@ describe('HTTP 身份边界', () => {
     expect(r.body.code).toBe('FORBIDDEN');
   });
 });
+
+describe('身份切换接口', () => {
+  it('切到课务身份后新令牌生效、旧令牌作废，权限按新身份重算', async () => {
+    const asAdmin = auth.login('admin', 'Admin!Pass2026x', 'A');
+    if (!asAdmin.ok) throw new Error('admin login failed');
+    auth.grantRole(asAdmin.principal, asAdmin.principal.userId, 'S');
+
+    const token = await loginThroughHttp('admin', 'Admin!Pass2026x', 'A');
+    const switched = await call('/api/auth/switch-role', {
+      method: 'POST',
+      token,
+      body: { actingRole: 'S' },
+    });
+    expect(switched.status).toBe(200);
+    const newToken = String(switched.body.token);
+    expect(newToken).not.toBe(token);
+
+    const me = await call('/api/me', { token: newToken });
+    expect((me.body.principal as { actingRole: string }).actingRole).toBe('S');
+
+    const stale = await call('/api/me', { token });
+    expect(stale.status).toBe(401);
+
+    const meta = await call('/api/meta', { token: newToken });
+    const caps = meta.body.capabilities as Array<{ action: string; verdict: string }>;
+    expect(caps.find((c) => c.action === 'IMPORT_TIMETABLE')?.verdict).toBe('ALLOWED');
+    expect(caps.find((c) => c.action === 'MANAGE_ACCOUNTS')?.verdict).toBe('FORBIDDEN');
+  });
+
+  it('切换到未授予自己的角色返回 403', async () => {
+    const token = await loginThroughHttp('admin', 'Admin!Pass2026x', 'A');
+    const r = await call('/api/auth/switch-role', {
+      method: 'POST',
+      token,
+      body: { actingRole: 'T' },
+    });
+    expect(r.status).toBe(403);
+    expect(r.body.code).toBe('ROLE_NOT_GRANTED');
+  });
+});
