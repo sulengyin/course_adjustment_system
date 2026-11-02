@@ -82,7 +82,7 @@ function main(): void {
   const db = new CourseDatabase(dbPath);
   try {
     const auth = new AuthService(db);
-    const login = auth.login(adminLogin, adminPassword);
+    const login = auth.login(adminLogin, adminPassword, env('CA_ACTOR_ROLE') || undefined);
     if (!login.ok) {
       console.error(`执行人登录失败 [${login.code}]：无法确认操作人身份，已中止`);
       process.exitCode = 1;
