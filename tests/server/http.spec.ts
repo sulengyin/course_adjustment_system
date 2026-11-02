@@ -430,3 +430,55 @@ describe('身份切换接口', () => {
     expect(r.body.code).toBe('ROLE_NOT_GRANTED');
   });
 });
+
+describe('调课候选接口', () => {
+  async function teacherToken(): Promise<string> {
+    return loginThroughHttp('teacher01', TEACHER_PW);
+  }
+
+  it('本人课次给出排序后的候选名单', async () => {
+    const token = await teacherToken();
+    const mine = await call(`/api/timetable/me?termId=${TERM}&from=${FROM}&to=${FROM}`, { token });
+    const rows = (mine.body.view as { rows: Array<{ occurrenceId: string; cancelled: boolean }> }).rows.filter(
+      (r) => !r.cancelled,
+    );
+    const occurrenceId = rows[0]?.occurrenceId;
+    expect(occurrenceId).toBeTruthy();
+
+    const r = await call(`/api/changes/candidates?termId=${TERM}&occurrenceId=${occurrenceId}`, { token });
+    expect(r.status).toBe(200);
+    expect(r.body.ok).toBe(true);
+    const candidates = r.body.candidates as Array<{ teacherId: string; freeAtSlot: boolean; reasons: string[] }>;
+    expect(candidates.length).toBeGreaterThan(0);
+    // 无课的排在有课之前
+    const firstBusy = candidates.findIndex((c) => !c.freeAtSlot);
+    if (firstBusy >= 0) expect(candidates.slice(firstBusy).every((c) => !c.freeAtSlot)).toBe(true);
+  });
+
+  it('缺参数返回 400，不存在的课次返回 404', async () => {
+    const token = await teacherToken();
+    const missing = await call('/api/changes/candidates?termId=' + TERM, { token });
+    expect(missing.status).toBe(400);
+    const notFound = await call(
+      `/api/changes/candidates?termId=${TERM}&occurrenceId=NO-SUCH-OCCURRENCE`,
+      { token },
+    );
+    expect(notFound.status).toBe(404);
+    expect(notFound.body.code).toBe('OCCURRENCE_NOT_FOUND');
+  });
+
+  it('他人的课次不给候选名单', async () => {
+    const token = await teacherToken();
+    const mine = await call(`/api/timetable/me?termId=${TERM}&from=${FROM}&to=${TO}`, { token });
+    const mineIds = new Set(
+      (mine.body.view as { rows: Array<{ occurrenceId: string }> }).rows.map((r) => r.occurrenceId),
+    );
+    const foreign = db.queryAll(TERM, FROM, TO).find((r) => !mineIds.has(r.occurrenceId));
+    expect(foreign).toBeDefined();
+    const r = await call(`/api/changes/candidates?termId=${TERM}&occurrenceId=${foreign!.occurrenceId}`, {
+      token,
+    });
+    expect(r.status).toBe(403);
+    expect(r.body.code).toBe('NOT_OWNER');
+  });
+});

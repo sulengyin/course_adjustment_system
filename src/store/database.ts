@@ -1019,6 +1019,17 @@ export class CourseDatabase {
     };
   }
 
+  /** 班级 → 年级。用于候选推荐的"同年级"判定；年级为空的班级不出现，不得编造。 */
+  classGrades(): Record<string, string> {
+    const rows = this.db.prepare('SELECT id, grade FROM school_class').all() as unknown as Array<{
+      id: string;
+      grade: string | null;
+    }>;
+    const out: Record<string, string> = {};
+    for (const r of rows) if (r.grade !== null && r.grade !== '') out[r.id] = r.grade;
+    return out;
+  }
+
   createBatch(b: ImportBatchRecord): void {
     this.db
       .prepare(

@@ -15,6 +15,7 @@ import { AuthError, PolicyDeniedError } from '../auth/service.js';
 import type { Principal } from '../auth/principal.js';
 import { can } from '../auth/policy.js';
 import type { ChangeService } from '../service/change-service.js';
+import { CandidateService } from '../service/candidate-service.js';
 import type { TimetableService } from '../service/timetable-service.js';
 import type { EmergencyService, EmergencySummary } from '../service/emergency-service.js';
 import { StatusService } from '../service/status-service.js';
@@ -29,6 +30,7 @@ export interface AppDeps {
   readonly timetable: TimetableService;
   readonly emergency: EmergencyService;
   readonly status?: StatusService;
+  readonly candidates?: CandidateService;
   readonly logger?: Logger;
   readonly now?: () => string;
 }
@@ -161,6 +163,7 @@ export type RequestListener = (req: IncomingMessage, res: ServerResponse) => voi
 
 export function createHandler(deps: AppDeps): RequestListener {
   const status = deps.status ?? new StatusService(deps.db, deps.now);
+  const candidates = deps.candidates ?? new CandidateService(deps.db);
   return (req, res) => {
     const startedAt = Date.now();
     if (deps.logger) {
@@ -339,6 +342,26 @@ export function createHandler(deps: AppDeps): RequestListener {
     if (path === '/api/changes/mine' && method === 'GET') {
       const view = deps.changes.listMine(principal);
       send(res, 200, { ok: true, submitted: view.submitted, awaiting: view.awaiting });
+      return;
+    }
+
+    // 调课对象候选：只读排课事实，不落库；只有该课次的现任授课教师能拿到名单。
+    // 必须排在 /api/changes/:id 之前，否则会被方案详情的正则吃掉。
+    if (path === '/api/changes/candidates' && method === 'GET') {
+      const termId = url.searchParams.get('termId');
+      const occurrenceId = url.searchParams.get('occurrenceId');
+      if (!termId || !occurrenceId) return fail(res, 400, 'BAD_INPUT');
+      const suggestion = candidates.suggest(termId, occurrenceId, principal);
+      const code = suggestion.code;
+      const httpStatus =
+        code === 'FOUND'
+          ? 200
+          : code === 'OCCURRENCE_NOT_FOUND'
+            ? 404
+            : code === 'OCCURRENCE_CANCELLED'
+              ? 409
+              : 403;
+      send(res, httpStatus, suggestion as unknown as Json);
       return;
     }
 

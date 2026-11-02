@@ -1161,13 +1161,93 @@ async function renderNewChange(panel, term, token) {
     ),
   );
 
-  const teachers = (state.refs?.teachers ?? []).filter((t) => t.id !== state.principal?.teacherId);
-  const teacherSelect = el('select', {}, ...teachers.map((t) => el('option', { value: t.id }, t.name)));
+  /**
+   * 改派对象：默认给"按规则排过序的候选"，而不是全校名单。
+   * 推荐不锁死选择——推荐之外仍然可选，界面会说明为什么要自行核对。
+   */
+  const TIER_LABEL = { SAME_CLASS: '教过该班', SAME_GRADE: '同年级', CROSS_GRADE: '跨年级' };
+  const teacherSelect = el('select', {});
+  const candidateHint = el('p', { class: 'hint' });
+  let candidates = [];
+
+  function allTeachers() {
+    return (state.refs?.teachers ?? []).filter((t) => t.id !== state.principal?.teacherId);
+  }
+
+  function optionOf(candidate) {
+    const tags = candidate.reasons
+      .filter((r) => !r.startsWith('当天'))
+      .slice(0, 2)
+      .join(' · ');
+    const name = candidate.teacherName ?? candidate.teacherId;
+    return el('option', { value: candidate.teacherId }, tags === '' ? name : `${name}（${tags}）`);
+  }
+
+  function fillTeacherSelect() {
+    clear(teacherSelect);
+    if (candidates.length === 0) {
+      for (const t of allTeachers()) teacherSelect.append(el('option', { value: t.id }, t.name));
+      return;
+    }
+    const recommended = candidates.filter((c) => c.freeAtSlot);
+    const needSwap = candidates.filter((c) => !c.freeAtSlot && (c.teachesSubject || c.tier !== 'CROSS_GRADE'));
+    const others = candidates.filter((c) => !c.freeAtSlot && !c.teachesSubject && c.tier === 'CROSS_GRADE');
+    if (recommended.length > 0) {
+      teacherSelect.append(
+        el('optgroup', { label: '推荐（该节次本人无课，按匹配度排序）' }, ...recommended.map(optionOf)),
+      );
+    }
+    if (needSwap.length > 0) {
+      teacherSelect.append(
+        el('optgroup', { label: '该节次有课 · 需先与对方对调' }, ...needSwap.map(optionOf)),
+      );
+    }
+    if (others.length > 0) {
+      teacherSelect.append(el('optgroup', { label: '其他教师' }, ...others.map(optionOf)));
+    }
+  }
+
+  function syncHint() {
+    const found = candidates.find((c) => c.teacherId === teacherSelect.value);
+    if (!found) {
+      candidateHint.textContent =
+        candidates.length === 0 ? '' : '该教师不在候选评估范围内，请自行核对对方该节次是否有课。';
+      return;
+    }
+    candidateHint.textContent = `${TIER_LABEL[found.tier] ?? found.tier}：${found.reasons.join('；')}`;
+  }
+
+  async function loadCandidates() {
+    const occurrenceId = occurrenceSelect.value;
+    if (!occurrenceId) return;
+    const r = await api(
+      `/api/changes/candidates?termId=${encodeURIComponent(term.id)}&occurrenceId=${encodeURIComponent(occurrenceId)}`,
+    );
+    if (token !== state.renderToken) return;
+    candidates = r.data.ok ? (r.data.candidates ?? []) : [];
+    fillTeacherSelect();
+    if (!r.data.ok) {
+      candidateHint.textContent = `候选推荐不可用（${r.data.code ?? r.status}），下列为全部教师，请自行核对。`;
+      return;
+    }
+    syncHint();
+  }
+
+  teacherSelect.addEventListener('change', syncHint);
+  occurrenceSelect.addEventListener('change', () => {
+    if (kind.value === 'REASSIGN') void loadCandidates();
+  });
 
   const dateField = el('input', { type: 'date', value: from });
   const periodField = el('input', { type: 'number', min: '1', max: '20', value: '1' });
 
-  const targetTeacher = el('label', { class: 'field' }, el('span', {}, '改派给'), teacherSelect);
+  const targetTeacher = el(
+    'label',
+    { class: 'field' },
+    el('span', {}, '改派给'),
+    teacherSelect,
+    candidateHint,
+  );
   const targetMove = el(
     'div',
     { class: 'row' },
@@ -1192,7 +1272,11 @@ async function renderNewChange(panel, term, token) {
     targetMove.hidden = kind.value !== 'MOVE';
     targetNone.hidden = kind.value !== 'CANCEL';
   }
-  kind.addEventListener('change', syncKind);
+  kind.addEventListener('change', () => {
+    syncKind();
+    // 切到"改派"时才需要候选名单；已加载过就复用，避免重复请求。
+    if (kind.value === 'REASSIGN' && candidates.length === 0) void loadCandidates();
+  });
 
   const form = el(
     'form',
@@ -1237,6 +1321,8 @@ async function renderNewChange(panel, term, token) {
   );
   syncKind();
   panel.append(form);
+  fillTeacherSelect();
+  if (kind.value === 'REASSIGN') void loadCandidates();
 }
 
 function renderChangeResult(res) {

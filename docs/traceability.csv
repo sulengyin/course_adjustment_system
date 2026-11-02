@@ -130,3 +130,9 @@ P7G-3,课表,只有课务管理人员能导入班级与科目,docs/12 §8 / perm
 P7G-4,课表,课表导入必须先有班级与科目，未知引用整批拒绝,docs/04 §4,P7G,,scripts/import-timetable.ts,verified
 P7G-5,课表,发布后必须展开为按日课次否则查询为空,docs/12 §8,P7G,,scripts/import-timetable.ts,verified
 P7G-6,课表,真实课表导入后同一教师与同一班级均无同时段冲突,docs/12 §8,P7G,,scripts/import-timetable.ts,verified
+P7H-1,调课,改派对象必须按规则排序推荐，不得平铺全校名单,docs/13 §3,P7H,,tests/domain/candidate.spec.ts,verified
+P7H-2,调课,匹配档位同班优先于同年级、同年级优先于跨年级,docs/13 §3,P7H,,tests/domain/candidate.spec.ts,verified
+P7H-3,调课,该节次有课的候选一律排在无课之后,docs/13 §3,P7H,,tests/domain/candidate.spec.ts,verified
+P7H-4,调课,推荐不强制：推荐之外的教师仍然可选,docs/13 §2,P7H,,web/app.js,verified
+P7H-5,调课,候选名单只给该课次的现任授课教师,docs/13 §5,P7H,,tests/server/http.spec.ts,verified
+P7H-6,调课,推荐不写库、不进入确认集合计算,docs/13 §2,P7H,,src/service/candidate-service.ts,verified
