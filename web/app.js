@@ -19,7 +19,7 @@ const STATUS_LABEL = {
   REJECTED: '已拒绝',
   WITHDRAWN: '已撤回',
 };
-const KIND_LABEL = { REASSIGN: '改派', MOVE: '调整时间', CANCEL: '停课' };
+const KIND_LABEL = { REASSIGN: '调课', MOVE: '调整时间', CANCEL: '停课' };
 const VERDICT_LABEL = { ALLOWED: '可用', FORBIDDEN: '无此权限', ROLE_NOT_ASSIGNED: '待校方确认' };
 const EMERGENCY_STATUS = {
   REQUESTED: '已求助',
@@ -917,7 +917,7 @@ function caseHeadLine(item) {
     ? `${cur.className} ${cur.subjectName} · ${cur.date} 第${cur.period}节 · ${cur.teacherName}`
     : `${item.occurrenceId}（课次已不存在）`;
   let right = '';
-  if (item.kind === 'REASSIGN') right = `改派给 ${item.toTeacherName ?? item.toTeacherId ?? '未指定'}`;
+  if (item.kind === 'REASSIGN') right = `调课给 ${item.toTeacherName ?? item.toTeacherId ?? '未指定'}`;
   else if (item.kind === 'MOVE') right = `调整到 ${item.toDate ?? '未填写'} 第${item.toPeriod ?? '未填写'}节`;
   else right = '停课';
   return el('div', { class: 'item-line' }, el('span', {}, left), el('span', { class: 'arrow' }, '→'), el('span', {}, right));
@@ -1181,7 +1181,7 @@ async function renderNewChange(panel, term, token) {
   );
 
   /**
-   * 改派对象：默认给"按规则排过序的候选"，而不是全校名单。
+   * 调课对象：默认给"按规则排过序的候选"，而不是全校名单。
    * 推荐不锁死选择——推荐之外仍然可选，界面会说明为什么要自行核对。
    *
    * 不用原生 select：候选上百人时，原生弹层在部分浏览器（尤其平板/手机）
@@ -1279,7 +1279,7 @@ async function renderNewChange(panel, term, token) {
         el(
           'p',
           { class: 'picker-empty' },
-          keyword === '' ? '没有可改派的教师。' : `没有匹配"${keyword}"的教师。清空过滤条件可看到全部。`,
+          keyword === '' ? '没有可调课的教师。' : `没有匹配"${keyword}"的教师。清空过滤条件可看到全部。`,
         ),
       );
     }
@@ -1418,7 +1418,7 @@ async function renderNewChange(panel, term, token) {
   const targetTeacher = el(
     'div',
     { class: 'field' },
-    el('span', {}, '改派给'),
+    el('span', {}, '调课给'),
     teacherTrigger,
     teacherPanel,
     candidateHint,
@@ -1435,7 +1435,7 @@ async function renderNewChange(panel, term, token) {
   const kind = el(
     'select',
     {},
-    el('option', { value: 'REASSIGN' }, '改派（换授课教师）'),
+    el('option', { value: 'REASSIGN' }, '调课（换授课教师）'),
     el('option', { value: 'MOVE' }, '调整时间（换日期/节次）'),
     el('option', { value: 'CANCEL' }, '停课'),
   );
@@ -1450,7 +1450,7 @@ async function renderNewChange(panel, term, token) {
   }
   kind.addEventListener('change', () => {
     syncKind();
-    // 切到"改派"时才需要候选名单；已加载过就复用，避免重复请求。
+    // 切到"调课"时才需要候选名单；已加载过就复用，避免重复请求。
     if (kind.value === 'REASSIGN' && candidates.length === 0) void loadCandidates();
   });
 
@@ -1471,7 +1471,7 @@ async function renderNewChange(panel, term, token) {
           }
           if (selectedTeacherId === '') {
             clear(result);
-            result.append(notice('请先选择要改派给的教师。', 'warn'));
+            result.append(notice('请先选择调课给哪位教师。', 'warn'));
             return;
           }
         }

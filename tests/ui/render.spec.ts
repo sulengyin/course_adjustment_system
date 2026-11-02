@@ -494,7 +494,7 @@ describe('页面渲染（最小 DOM）', () => {
     expect(text).toContain('待我确认');
   });
 
-  it('改派对象是页面内可滚动名单，不依赖浏览器原生下拉弹层', async () => {
+  it('调课对象是页面内可滚动名单，不依赖浏览器原生下拉弹层', async () => {
     const harness = createHarness(
       {
         '/api/me': { ok: true, principal: PRINCIPAL },
@@ -544,7 +544,7 @@ describe('页面渲染（最小 DOM）', () => {
     form?.dispatch('submit');
     await harness.flush();
     expect(harness.requests).not.toContain('/api/changes');
-    expect(textOf(app)).toContain('请先选择要改派给的教师');
+    expect(textOf(app)).toContain('请先选择调课给哪位教师');
 
     const row = findAllTag(list as FakeNode, 'button')[0];
     row?.dispatch('click');

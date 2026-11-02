@@ -164,7 +164,7 @@ export function projectChange(
         errors.push({
           code: 'MISSING_TARGET',
           occurrenceId: item.occurrenceId,
-          detail: '改派未指定新教师',
+          detail: '调课未指定新教师',
           preExisting: false,
         });
         continue;
@@ -173,7 +173,7 @@ export function projectChange(
         errors.push({
           code: 'NO_OP',
           occurrenceId: item.occurrenceId,
-          detail: '改派后教师未变化',
+          detail: '调课后教师未变化',
           preExisting: false,
         });
         continue;

@@ -4,7 +4,7 @@
  * 定位（重要）：
  *   推荐只回答"谁更可能接得下这节课"，不回答"谁必须接"。
  *   规则全部来自可核验的事实（本学期排课安排、当天课表），不引入任何主观评价分数。
- *   最终仍然要被改派教师本人确认；推荐不代替确认，也不限制发起人只能选推荐名单内的人。
+ *   最终仍然要由接手的教师本人确认；推荐不代替确认，也不限制发起人只能选推荐名单内的人。
  *
  * 术语：这里的"任教"一律指**本学期当前有效的排课**（模板未撤销），
  *   不是"历史上教过"。已撤销的模板不再计入，避免把过去的关系当成现在的依据。
@@ -83,7 +83,7 @@ export interface CandidateInput {
   readonly dayPeriodsByTeacher: Readonly<Record<string, readonly number[]>>;
   /** 该节次已有课的教师（按目标时段统计） */
   readonly busyAtSlot: readonly string[];
-  /** 方案的目标节次；不填则按原节次（改派场景） */
+  /** 方案的目标节次；不填则按原节次（换教师场景） */
   readonly targetPeriod?: number;
   /** 目标日期当天，该班该科目已有节数（含本课次）；用于"一天两节同科"提示 */
   readonly classSubjectDayCount?: number;
@@ -96,7 +96,7 @@ export interface Candidate {
   /** 综合分，仅用于排序展示，不代表"能力评价" */
   readonly score: number;
   readonly teachesSubject: boolean;
-  /** 该节次本人无课：改派后不会立刻产生撞课 */
+  /** 该节次本人无课：换人后不会立刻产生撞课 */
   readonly freeAtSlot: boolean;
   readonly dayCount: number;
   /** 接手后的当天课数（原课数 + 1） */
