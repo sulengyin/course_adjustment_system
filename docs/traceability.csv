@@ -116,3 +116,5 @@ P7E-3,作息,节次必须从1连续且结束晚于开始,docs/09 §4,P7E,,tests/
 P7E-4,作息,只有课务管理人员能导入作息，管理员不得代管,docs/09 §5 / permission-matrix,P7E,,tests/service/term-import.spec.ts,verified
 P7E-5,作息,真实作息标记 IMPORTED_UNVERIFIED 并留 IMPORT_TERM 审计,docs/09 §5,P7E,,tests/service/term-import.spec.ts,verified
 P7E-6,作息,大课间与眼保健操及午餐与课后服务时段不入 bell,docs/09 §2,P7E,,scripts/import-bell.ts,verified
+P7E-7,教师档案,教师名单遗漏的在校教师可由课务补录，编号系统生成并标待正式工号,docs/09 §7,P7E,,scripts/import-teachers.ts,verified
+P7E-8,教师档案,课表姓名与档案不一致时按档案纠正且纠正须留痕,docs/09 §7,P7E,,docs/09 §7,verified
