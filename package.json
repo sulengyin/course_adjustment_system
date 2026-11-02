@@ -23,6 +23,8 @@
     "bulk-users": "tsx scripts/bulk-create-users.ts",
     "import-teachers": "tsx scripts/import-teachers.ts",
     "import-bell": "tsx scripts/import-bell.ts",
+    "import-base": "tsx scripts/import-base.ts",
+    "import-timetable": "tsx scripts/import-timetable.ts",
     "reset-password": "tsx scripts/reset-password.ts",
     "grant-role": "tsx scripts/grant-role.ts",
     "set-mode": "tsx scripts/set-mode.ts"

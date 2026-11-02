@@ -954,6 +954,29 @@ export class CourseDatabase {
     for (const t of list) stmt.run(t.id, t.displayName, t.dataOrigin);
   }
 
+  /** 班级与科目的唯一写入口；冲突由服务层整批预检拦下。 */
+  insertClasses(list: readonly { id: string; displayName: string; grade: string; dataOrigin: DataOrigin }[]): void {
+    const stmt = this.db.prepare(
+      'INSERT INTO school_class(id, display_name, grade, data_origin) VALUES(?,?,?,?)',
+    );
+    for (const c of list) stmt.run(c.id, c.displayName, c.grade, c.dataOrigin);
+  }
+
+  insertSubjects(list: readonly { id: string; name: string; dataOrigin: DataOrigin }[]): void {
+    const stmt = this.db.prepare('INSERT INTO subject(id, name, data_origin) VALUES(?,?,?)');
+    for (const s of list) stmt.run(s.id, s.name, s.dataOrigin);
+  }
+
+  countClasses(): number {
+    const row = this.db.prepare('SELECT COUNT(*) AS n FROM school_class').get() as { n: number };
+    return row.n;
+  }
+
+  countSubjects(): number {
+    const row = this.db.prepare('SELECT COUNT(*) AS n FROM subject').get() as { n: number };
+    return row.n;
+  }
+
   countTerms(): number {
     const row = this.db.prepare('SELECT COUNT(*) AS n FROM term').get() as { n: number };
     return row.n;
