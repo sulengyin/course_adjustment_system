@@ -78,7 +78,7 @@ export interface LoginFailure {
 
 export type LoginResult = LoginSuccess | LoginFailure;
 
-const LOGIN_RE = /^[a-z0-9][a-z0-9._-]{2,31}$/;
+export const LOGIN_RE = /^[a-z0-9][a-z0-9._-]{2,31}$/;
 
 function sha256(value: string): string {
   return createHash('sha256').update(value, 'utf8').digest('hex');
@@ -466,6 +466,7 @@ export class AuthService {
     readonly id: string;
     readonly loginName: string;
     readonly displayName: string;
+    readonly teacherId: string | null;
     readonly role: string;
     readonly status: string;
     readonly mustChangePassword: boolean;
@@ -474,6 +475,7 @@ export class AuthService {
       id: u.id,
       loginName: u.loginName,
       displayName: u.displayName,
+      teacherId: u.teacherId,
       role: this.store.rolesOf(u.id).join(','),
       status: u.status,
       mustChangePassword: u.mustChangePassword,

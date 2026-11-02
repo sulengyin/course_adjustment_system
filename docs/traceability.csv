@@ -89,3 +89,12 @@ P7A-7,界面,待校方确认的职责在界面显示为禁用并说明原因,per
 P7A-8,界面,真实浏览器与移动端实机主路径验证,V2.3-01 §2.1,P7A,,docs/reports/P7A-报告.md,not_run
 P7A-9,界面,登录失败（401）提示凭据错误而非"会话失效",V2.3-01 §2.2,P7A,AC12,tests/ui/render.spec.ts,verified
 P7A-10,界面,改密被拒绝时留在原页说明原因且不谎报成功,docs/02 会话与口令,P7A,,tests/ui/render.spec.ts,verified
+P7B-1,账号,批量开通账号整批预检通过后才建号,docs/05 §3,P7B,,tests/service/bulk-user.spec.ts,verified
+P7B-2,账号,教师档案缺失或编号重复绑定时不建孤儿账号,docs/05 §3,P7B,,tests/service/bulk-user.spec.ts,verified
+P7B-3,账号,初始口令由系统生成且不接受外部指定统一口令,docs/02 会话与口令 / docs/05 §5,P7B,,tests/service/bulk-user.spec.ts,verified
+P7B-4,账号,未定职责（C/R/J）不得通过批量开通授予,permission-matrix,P7B,,tests/service/bulk-user.spec.ts,verified
+P7B-5,名单,教师名单导入整批预检通过后才建档,docs/06 §4,P7B,,tests/service/teacher-roster.spec.ts,verified
+P7B-6,名单,真实名单只标记为 IMPORTED_UNVERIFIED，不可升级为 OFFICIAL,docs/06 §1,P7B,,tests/service/teacher-roster.spec.ts,verified
+P7B-7,名单,姓名唯一：重名会让课表按姓名匹配时无法区分,docs/04 §4 / docs/06 §4,P7B,,tests/service/teacher-roster.spec.ts,verified
+P7B-8,名单,自动生成的编号避开库中与本批已占用，并留待迁移的审计提示,docs/06 §3,P7B,,tests/service/teacher-roster.spec.ts,verified
+P7B-9,权限,导入名单归课务管理人员，管理员不得代管业务基础资料,permission-matrix,P7B,,tests/service/teacher-roster.spec.ts,verified

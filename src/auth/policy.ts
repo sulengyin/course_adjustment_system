@@ -15,6 +15,7 @@ export type Action =
   | 'VIEW_OWN_TIMETABLE'
   | 'VIEW_OTHER_TIMETABLE'
   | 'IMPORT_TIMETABLE'
+  | 'IMPORT_ROSTER'
   | 'PUBLISH_TIMETABLE'
   | 'CREATE_OWN_CHANGE'
   | 'DECIDE_OWN_CONFIRMATION'
@@ -49,6 +50,8 @@ export const POLICY: Readonly<Record<Action, Row>> = Object.freeze({
   VIEW_OWN_TIMETABLE: row(ALLOW, ALLOW, ALLOW, ALLOW, ALLOW, ALLOW),
   VIEW_OTHER_TIMETABLE: row(ALLOW, ALLOW, ALLOW, ALLOW, ALLOW, ALLOW),
   IMPORT_TIMETABLE: row(DENY, ALLOW, DENY, DENY, DENY, DENY),
+  // 教师/班级名单是业务基础资料，归课务管理人员；管理员不代管（INV-08 同向）
+  IMPORT_ROSTER: row(DENY, ALLOW, DENY, DENY, DENY, DENY),
   // 发布岗位未证实（AC01）：S 也只有 TBD_BLOCKED
   PUBLISH_TIMETABLE: row(DENY, TBD, DENY, DENY, DENY, DENY),
   CREATE_OWN_CHANGE: row(ALLOW, DENY, DENY, DENY, DENY, DENY),
@@ -82,6 +85,7 @@ export const ACTION_LABEL: Readonly<Record<Action, string>> = Object.freeze({
   VIEW_OWN_TIMETABLE: '查看本人课表',
   VIEW_OTHER_TIMETABLE: '查看他人课表',
   IMPORT_TIMETABLE: '导入课表文件',
+  IMPORT_ROSTER: '导入教师 / 班级名单',
   PUBLISH_TIMETABLE: '正式发布课表',
   CREATE_OWN_CHANGE: '发起本人调课方案',
   DECIDE_OWN_CONFIRMATION: '确认本人课务',

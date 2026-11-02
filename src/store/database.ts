@@ -906,6 +906,15 @@ export class CourseDatabase {
   /* ---------------- 导入（P3） ---------------- */
 
   /** 供导入校验解析"教师/班级/科目"名称：按 id 与显示名都能匹配 */
+  /**
+   * 教师名单导入的唯一写入口。
+   * 冲突由服务层整批预检拦下；这里不做事后修补——编号一旦落库就会被课表与账号引用。
+   */
+  insertTeachers(list: readonly { id: string; displayName: string; dataOrigin: DataOrigin }[]): void {
+    const stmt = this.db.prepare('INSERT INTO teacher(id, display_name, data_origin) VALUES(?,?,?)');
+    for (const t of list) stmt.run(t.id, t.displayName, t.dataOrigin);
+  }
+
   refs(): {
     teachers: Array<{ id: string; name: string }>;
     classes: Array<{ id: string; name: string }>;

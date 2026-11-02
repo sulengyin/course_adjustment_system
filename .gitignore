@@ -2,3 +2,13 @@ node_modules/
 dist/
 *.log
 .DS_Store
+
+# 本地工作记录：含账号、口令、真实名单等上下文，不得入库（仓库是公开的）
+.workbuddy/
+
+# 真实数据一律放仓库之外；此处只是兜底，防止误放进来后被提交
+*.db
+*.sqlite
+*.sqlite3
+data/
+backups/
