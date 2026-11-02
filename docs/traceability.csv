@@ -87,3 +87,5 @@ P7A-5,界面,静态资源按白名单提供且不可穿越目录,V2.3-01 §2.1,P
 P7A-6,界面,调课生效后教师与班级课表立即反映新归属,V2.3-01 §4.2,P7A,,tests/store/timetable-overlay.spec.ts; scripts/smoke-ui.ts,verified
 P7A-7,界面,待校方确认的职责在界面显示为禁用并说明原因,permission-matrix §5,P7A,,tests/server/read-api.spec.ts; scripts/smoke-ui.ts,verified
 P7A-8,界面,真实浏览器与移动端实机主路径验证,V2.3-01 §2.1,P7A,,docs/reports/P7A-报告.md,not_run
+P7A-9,界面,登录失败（401）提示凭据错误而非"会话失效",V2.3-01 §2.2,P7A,AC12,tests/ui/render.spec.ts,verified
+P7A-10,界面,改密被拒绝时留在原页说明原因且不谎报成功,docs/02 会话与口令,P7A,,tests/ui/render.spec.ts,verified

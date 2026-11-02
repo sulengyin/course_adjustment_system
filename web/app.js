@@ -205,7 +205,11 @@ async function api(path, options = {}) {
   } catch {
     data = {};
   }
-  if (res.status === 401) {
+  // 401 只在"身份未通过"（UNAUTHENTICATED）时才是会话失效。
+  // 登录接口的 401 是"账号或口令不对"，改密接口的 401 是"原口令不对"——
+  // 两者都是表单要处理的业务错误，若按会话失效处理，会清空已填内容并弹回登录页，
+  // 把用户引向"会话/网络有问题"的错误方向。
+  if (res.status === 401 && data.code === 'UNAUTHENTICATED') {
     saveToken('');
     state.principal = null;
     renderLogin('登录已失效，请重新登录');
@@ -351,16 +355,23 @@ function renderChangePassword(forced) {
         }
         submit.disabled = true;
         try {
-          await api('/api/me/password', {
+          const res = await api('/api/me/password', {
             method: 'POST',
             body: { oldPassword: oldPassword.value, newPassword: newPassword.value },
           });
+          // 必须按状态码判断：改密被拒绝时服务端返回 400/401，
+          // 若一律当作成功，用户会拿着没生效的新口令去登录，且不知道改密其实失败了。
+          if (!res.ok) {
+            msg.className = 'msg error';
+            msg.textContent = passwordErrorText(res.data.code, res.data.message);
+            return;
+          }
           saveToken('');
           state.principal = null;
           renderLogin('口令已修改，请用新口令重新登录。');
         } catch {
           msg.className = 'msg error';
-          msg.textContent = '修改失败：口令可能不符合要求，或原口令不正确。';
+          msg.textContent = '修改失败：无法连接服务，请确认已接入校内网络。';
         } finally {
           submit.disabled = false;
         }
@@ -377,6 +388,25 @@ function renderChangePassword(forced) {
 
   app.append(el('div', { class: 'login-wrap' }, form));
   oldPassword.focus();
+}
+
+/* ------------------------------------------------------------------ 改密失败文案 */
+
+function passwordErrorText(code, serverMessage) {
+  switch (code) {
+    case 'INVALID_CREDENTIALS':
+      return '原口令不正确。';
+    case 'WEAK_PASSWORD': {
+      const rule = '至少 12 位，含字母、数字、符号中的两类，且不能与原口令相同';
+      return typeof serverMessage === 'string' && serverMessage
+        ? `${serverMessage}（${rule}）`
+        : `新口令不符合要求：${rule}。`;
+    }
+    case 'BAD_INPUT':
+      return '请完整填写原口令与新口令。';
+    default:
+      return `修改失败（${code ?? '未知原因'}）。`;
+  }
 }
 
 /* ------------------------------------------------------------------ 外壳 */

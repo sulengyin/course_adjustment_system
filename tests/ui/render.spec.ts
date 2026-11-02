@@ -139,10 +139,15 @@ function createHarness(routes: Record<string, unknown>, token: string | null): H
     const path = input.startsWith('http') ? new URL(input).pathname : (input.split('?')[0] ?? input);
     const key = Object.keys(routes).find((route) => path === route || path.startsWith(`${route.replace(/\/$/, '')}/`));
     requests.push(input);
-    const body = key ? routes[key] : { ok: false, code: 'NOT_FOUND' };
+    const entry = key ? routes[key] : undefined;
+    // 路由值默认按 200 返回；写成 { status, body } 可模拟 401 等失败响应。
+    const wrapped =
+      entry !== null && typeof entry === 'object' && 'status' in entry && 'body' in entry;
+    const status = wrapped ? (entry as { status: number }).status : key ? 200 : 404;
+    const body = wrapped ? (entry as { body: unknown }).body : key ? entry : { ok: false, code: 'NOT_FOUND' };
     return {
-      status: key ? 200 : 404,
-      ok: Boolean(key),
+      status,
+      ok: status >= 200 && status < 300,
       json: async () => body,
     };
   };
@@ -205,6 +210,31 @@ function textOf(node: FakeNode): string {
     text += n.textContent;
   });
   return text;
+}
+
+function changePasswordInputs(app: FakeNode): [FakeNode, FakeNode, FakeNode] {
+  const inputs = findAllTag(app, 'input');
+  const [oldInput, newInput, againInput] = inputs;
+  if (inputs.length !== 3 || !oldInput || !newInput || !againInput) {
+    throw new Error(`改密页应有 3 个输入框，实际 ${inputs.length} 个`);
+  }
+  return [oldInput, newInput, againInput];
+}
+
+function findAllTag(root: FakeNode, tag: string): FakeNode[] {
+  const found: FakeNode[] = [];
+  walk(root, (n) => {
+    if (n.tagName === tag) found.push(n);
+  });
+  return found;
+}
+
+function findTag(root: FakeNode, tag: string): FakeNode | null {
+  let found: FakeNode | null = null;
+  walk(root, (n) => {
+    if (!found && n.tagName === tag) found = n;
+  });
+  return found;
 }
 
 function findByText(root: FakeNode, label: string): FakeNode | null {
@@ -282,6 +312,100 @@ describe('页面渲染（最小 DOM）', () => {
     expect(text).toContain('校内课务协同系统');
     expect(text).toContain('登录');
     expect(harness.requests).toEqual([]);
+  });
+
+  it('登录接口返回 401 时按凭据错误提示，不误报"登录已失效"', async () => {
+    const harness = createHarness(
+      { '/api/auth/login': { status: 401, body: { ok: false, code: 'INVALID_CREDENTIALS' } } },
+      null,
+    );
+    await harness.flush();
+    const app = harness.document.getElementById('app') as FakeNode;
+    const nameInput = harness.document.getElementById('login-name');
+    const passwordInput = harness.document.getElementById('login-password');
+    if (!nameInput || !passwordInput) throw new Error('登录表单缺少账号或口令输入框');
+    nameInput.value = 'teacher01';
+    passwordInput.value = '输错的口令';
+    findTag(app, 'form')?.dispatch('submit');
+    await harness.flush();
+
+    const text = textOf(app);
+    expect(text).toContain('账号或口令不正确');
+    expect(text).not.toContain('登录已失效');
+  });
+
+  it('业务接口 401 仍按会话失效处理', async () => {
+    const harness = createHarness({ '/api/me': { status: 401, body: { ok: false, code: 'UNAUTHENTICATED' } } }, 'token-1');
+    await harness.flush();
+    expect(textOf(harness.document.getElementById('app') as FakeNode)).toContain('登录已失效');
+  });
+
+  it('改密被服务端拒绝时留在改密页并说明原因，不能当作成功', async () => {
+    // 服务端以 400 WEAK_PASSWORD 拒绝：曾经前端不看状态码，一律提示"口令已修改"，
+    // 用户随后拿没生效的新口令登录，看到的却是"登录已失效"。
+    const harness = createHarness(
+      {
+        '/api/me/password': { status: 400, body: { ok: false, code: 'WEAK_PASSWORD', message: '口令不符合最低要求：ONLY_ONE_CHARACTER_CLASS' } },
+        '/api/me': { ok: true, principal: { ...PRINCIPAL, mustChangePassword: true } },
+      },
+      'token-1',
+    );
+    await harness.flush();
+    const app = harness.document.getElementById('app') as FakeNode;
+    const [oldInput, newInput, againInput] = changePasswordInputs(app);
+    oldInput.value = '9732EVNPA5DT';
+    newInput.value = '12345678901234';
+    againInput.value = '12345678901234';
+    findTag(app, 'form')?.dispatch('submit');
+    await harness.flush();
+
+    const text = textOf(app);
+    expect(text).toContain('口令不符合最低要求');
+    expect(text).toContain('至少 12 位');
+    expect(text).not.toContain('请用新口令重新登录');
+    expect(text).toContain('首次登录需修改口令');
+  });
+
+  it('改密时原口令错误提示"原口令不正确"，不按会话失效处理', async () => {
+    const harness = createHarness(
+      {
+        '/api/me/password': { status: 401, body: { ok: false, code: 'INVALID_CREDENTIALS' } },
+        '/api/me': { ok: true, principal: { ...PRINCIPAL, mustChangePassword: true } },
+      },
+      'token-1',
+    );
+    await harness.flush();
+    const app = harness.document.getElementById('app') as FakeNode;
+    const [oldInput, newInput, againInput] = changePasswordInputs(app);
+    oldInput.value = '错的旧口令';
+    newInput.value = 'New1234567890';
+    againInput.value = 'New1234567890';
+    findTag(app, 'form')?.dispatch('submit');
+    await harness.flush();
+
+    const text = textOf(app);
+    expect(text).toContain('原口令不正确');
+    expect(text).not.toContain('登录已失效');
+  });
+
+  it('改密成功后提示用新口令重新登录', async () => {
+    const harness = createHarness(
+      {
+        '/api/me/password': { status: 200, body: { ok: true, reauthRequired: true } },
+        '/api/me': { ok: true, principal: { ...PRINCIPAL, mustChangePassword: true } },
+      },
+      'token-1',
+    );
+    await harness.flush();
+    const app = harness.document.getElementById('app') as FakeNode;
+    const [oldInput, newInput, againInput] = changePasswordInputs(app);
+    oldInput.value = '9732EVNPA5DT';
+    newInput.value = 'New1234567890';
+    againInput.value = 'New1234567890';
+    findTag(app, 'form')?.dispatch('submit');
+    await harness.flush();
+
+    expect(textOf(app)).toContain('请用新口令重新登录');
   });
 
   it('已登录时渲染外壳与课表，未决日期显式提示', async () => {
