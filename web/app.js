@@ -1165,7 +1165,7 @@ async function renderNewChange(panel, term, token) {
    * 改派对象：默认给"按规则排过序的候选"，而不是全校名单。
    * 推荐不锁死选择——推荐之外仍然可选，界面会说明为什么要自行核对。
    */
-  const TIER_LABEL = { SAME_CLASS: '教过该班', SAME_GRADE: '同年级', CROSS_GRADE: '跨年级' };
+  const TIER_LABEL = { SAME_CLASS: '任教该班', SAME_GRADE: '任教同年级', CROSS_GRADE: '跨年级' };
   const teacherSelect = el('select', {});
   const candidateHint = el('p', { class: 'hint' });
   let candidates = [];

@@ -30,7 +30,7 @@ describe('调课对象候选推荐', () => {
     expect(ranked.map((c) => c.tier)).toEqual(['SAME_CLASS', 'SAME_GRADE', 'CROSS_GRADE']);
   });
 
-  it('教过同一科目的排在未教过的前面', () => {
+  it('同一档位内，任教同一科目的排在前面', () => {
     const ranked = rankCandidates(
       input({
         teaching: [
@@ -42,6 +42,51 @@ describe('调课对象候选推荐', () => {
     expect(ranked[0]?.teacherId).toBe('T1');
     expect(ranked[0]?.teachesSubject).toBe(true);
     expect(ranked[1]?.teachesSubject).toBe(false);
+  });
+
+  it('任教该班但科目不同的教师，优先于同年级的同科教师', () => {
+    const ranked = rankCandidates(
+      input({
+        teaching: [
+          { teacherId: 'T1', classId: 'C1', subjectId: 'S2' },
+          { teacherId: 'T2', classId: 'C2', subjectId: 'S1' },
+        ],
+        teachers: [{ id: 'T0' }, { id: 'T1' }, { id: 'T2' }],
+      }),
+    );
+    expect(ranked.map((c) => c.teacherId)).toEqual(['T1', 'T2']);
+    expect(ranked[0]?.tier).toBe('SAME_CLASS');
+    expect(ranked[0]?.teachesSubject).toBe(false);
+    expect(ranked[1]?.teachesSubject).toBe(true);
+  });
+
+  it('同年级同科优先于跨年级同科', () => {
+    const ranked = rankCandidates(
+      input({
+        teaching: [
+          { teacherId: 'T1', classId: 'C2', subjectId: 'S1' },
+          { teacherId: 'T2', classId: 'C9', subjectId: 'S1' },
+        ],
+        teachers: [{ id: 'T0' }, { id: 'T1' }, { id: 'T2' }],
+      }),
+    );
+    expect(ranked.map((c) => c.teacherId)).toEqual(['T1', 'T2']);
+    expect(ranked.map((c) => c.tier)).toEqual(['SAME_GRADE', 'CROSS_GRADE']);
+  });
+
+  it('课程密度再高也不跨档位翻顺序', () => {
+    const ranked = rankCandidates(
+      input({
+        teaching: [
+          { teacherId: 'T1', classId: 'C1', subjectId: 'S2' },
+          { teacherId: 'T2', classId: 'C2', subjectId: 'S1' },
+        ],
+        teachers: [{ id: 'T0' }, { id: 'T1' }, { id: 'T2' }],
+        // T1 当天 8 节（密度分为 0），T2 当天 0 节（密度满分）——档位仍然优先
+        dayCountByTeacher: { T1: 8, T2: 0 },
+      }),
+    );
+    expect(ranked.map((c) => c.teacherId)).toEqual(['T1', 'T2']);
   });
 
   it('该节次有课的一律排在无课之后，即使匹配度更高', () => {
@@ -97,5 +142,21 @@ describe('调课对象候选推荐', () => {
     expect(ranked[0]?.teachesSubject).toBe(false);
     expect(ranked[0]?.reasons).toContain('该节次本人无课');
     expect(ranked[0]?.reasons).toContain('当天没有排课');
+  });
+
+  it('理由写的是本学期任教，不写历史上教过', () => {
+    const ranked = rankCandidates(
+      input({
+        teaching: [
+          { teacherId: 'T1', classId: 'C1', subjectId: 'S1' },
+          { teacherId: 'T2', classId: 'C2', subjectId: 'S9' },
+        ],
+        teachers: [{ id: 'T0' }, { id: 'T1' }, { id: 'T2' }],
+      }),
+    );
+    expect(ranked[0]?.reasons).toContain('本学期任教这个班');
+    expect(ranked[0]?.reasons).toContain('本学期任教同一科目');
+    expect(ranked[1]?.reasons.join('；')).toContain('本学期任教同年级（一年级）其他班');
+    expect(ranked.map((c) => c.reasons.join('；')).join('；')).not.toContain('教过');
   });
 });
