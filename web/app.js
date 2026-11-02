@@ -485,7 +485,10 @@ function renderShell() {
   }
   items.push(['access', '权限与审计']);
   if (capability('VIEW_SCHOOL_AUDIT') === 'ALLOWED') items.push(['school', '系统状态']);
-  if (!items.some(([key]) => key === state.section)) state.section = items[0][0];
+  // 设置不是导航里的一个区，而是顶栏的全局入口；别把它挤回主导航第一项。
+  if (state.section !== 'settings' && !items.some(([key]) => key === state.section)) {
+    state.section = items[0][0];
+  }
 
   for (const [key, label] of items) {
     nav.append(
@@ -533,6 +536,16 @@ function renderShell() {
       el('span', {}, `${p.displayName}${roleSelect ? '' : `　${ROLE_LABEL[p.actingRole] ?? p.actingRole}`}`),
       roleSelect,
 
+      el(
+        'button',
+        {
+          class: 'btn ghost',
+          type: 'button',
+          title: '偏好与筛选口径',
+          onclick: () => go('settings'),
+        },
+        '设置',
+      ),
       el('button', { class: 'btn ghost', type: 'button', onclick: () => renderChangePassword(false) }, '改密'),
       el(
         'button',
@@ -583,6 +596,7 @@ async function renderSection(main) {
     else if (state.section === 'emergency') await sectionEmergency(view, token);
     else if (state.section === 'access') await sectionAccess(view, token);
     else if (state.section === 'school') await sectionSchool(view, token);
+    else if (state.section === 'settings') await renderSettings(view, token);
   } catch (error) {
     if (String(error?.message) === 'UNAUTHENTICATED') return;
     if (token !== state.renderToken) return;
@@ -1192,112 +1206,6 @@ async function renderNewChange(panel, term, token) {
     teacherList,
   );
 
-  /**
-   * 筛选条件：默认取"我的偏好 > 全校默认 > 中性默认"（服务端已算好），
-   * 教师可以在这里临时改，也可以存成自己的偏好。系统不替学校把口径写死。
-   */
-  const serverPref = state.pref?.preference ?? null;
-  const prefState = {
-    considerSameClass: serverPref?.consider?.sameClass ?? true,
-    considerSameGrade: serverPref?.consider?.sameGrade ?? true,
-    considerSameSubject: serverPref?.consider?.sameSubject ?? true,
-    considerLightLoad: serverPref?.consider?.lightLoad ?? true,
-    excludeBusyAtSlot: serverPref?.exclude?.busyAtSlot ?? false,
-    excludeConsecutive: serverPref?.exclude?.consecutive ?? false,
-    consecutiveLimit: serverPref?.exclude?.consecutiveLimit ?? 3,
-    excludeDayTotal: serverPref?.exclude?.dayTotal ?? false,
-    dayTotalLimit: serverPref?.exclude?.dayTotalLimit ?? 6,
-    hintClassSubjectDay: serverPref?.hint?.classSubjectDay ?? true,
-    classSubjectDayLimit: serverPref?.hint?.classSubjectDayLimit ?? 2,
-  };
-
-  const cbSameClass = el('input', { type: 'checkbox', checked: prefState.considerSameClass });
-  const cbSameGrade = el('input', { type: 'checkbox', checked: prefState.considerSameGrade });
-  const cbSameSubject = el('input', { type: 'checkbox', checked: prefState.considerSameSubject });
-  const cbLightLoad = el('input', { type: 'checkbox', checked: prefState.considerLightLoad });
-  const cbBusy = el('input', { type: 'checkbox', checked: prefState.excludeBusyAtSlot });
-  const cbRun = el('input', { type: 'checkbox', checked: prefState.excludeConsecutive });
-  const numRun = el('input', {
-    type: 'number',
-    min: '1',
-    max: '20',
-    value: String(prefState.consecutiveLimit),
-  });
-  const cbTotal = el('input', { type: 'checkbox', checked: prefState.excludeDayTotal });
-  const numTotal = el('input', { type: 'number', min: '1', max: '20', value: String(prefState.dayTotalLimit) });
-  const numSubjectDay = el('input', {
-    type: 'number',
-    min: '1',
-    max: '20',
-    value: String(prefState.classSubjectDayLimit),
-  });
-
-  function readPref() {
-    return {
-      considerSameClass: cbSameClass.checked,
-      considerSameGrade: cbSameGrade.checked,
-      considerSameSubject: cbSameSubject.checked,
-      considerLightLoad: cbLightLoad.checked,
-      excludeBusyAtSlot: cbBusy.checked,
-      excludeConsecutive: cbRun.checked,
-      consecutiveLimit: Number(numRun.value),
-      excludeDayTotal: cbTotal.checked,
-      dayTotalLimit: Number(numTotal.value),
-      hintClassSubjectDay: true,
-      classSubjectDayLimit: Number(numSubjectDay.value),
-    };
-  }
-
-  const saveMine = el('button', { type: 'button', class: 'btn' }, '保存为我的偏好');
-  saveMine.addEventListener('click', async () => {
-    const r = await api('/api/preferences/change', { method: 'PUT', body: readPref() });
-    toast(r.data.ok ? '已保存为我的筛选偏好，下次发起调课默认使用。' : `保存失败（${r.data.code ?? r.status}）`, !r.data.ok);
-  });
-
-  const saveSchool = el('button', { type: 'button', class: 'btn' }, '设为全校默认');
-  saveSchool.addEventListener('click', async () => {
-    const r = await api('/api/preferences/change/school', { method: 'PUT', body: readPref() });
-    toast(
-      r.data.ok ? '已保存为全校默认筛选（教师仍可在自己的偏好里覆盖）。' : `保存失败（${r.data.code ?? r.status}）`,
-      !r.data.ok,
-    );
-  });
-
-  const filterBox = el(
-    'details',
-    { class: 'card' },
-    el('summary', {}, '候选筛选（可选：考虑什么、不考虑谁）'),
-    el('p', { class: 'hint' }, '只影响给你看的排序与显示；不影响谁必须确认，也不改变冲突判定。'),
-    el(
-      'div',
-      { class: 'row' },
-      el('label', { class: 'check' }, cbSameClass, '任教该班'),
-      el('label', { class: 'check' }, cbSameGrade, '任教同年级'),
-      el('label', { class: 'check' }, cbSameSubject, '任教同一科目'),
-      el('label', { class: 'check' }, cbLightLoad, '当天课时少'),
-    ),
-    el(
-      'div',
-      { class: 'row' },
-      el('label', { class: 'check' }, cbBusy, '该节次本人有课'),
-      el('label', { class: 'check' }, cbRun, '接手后连上 ≥', numRun, '节'),
-    ),
-    el('div', { class: 'row' }, el('label', { class: 'check' }, cbTotal, '接手后当天超过', numTotal, '节')),
-    el('p', { class: 'hint' }, '该班当天同一科目达到', numSubjectDay, '节时提示（只提示，不排除）。'),
-    el('div', { class: 'row mt10' }, saveMine, state.pref?.canEditSchool ? saveSchool : null),
-  );
-
-  for (const box of [cbSameClass, cbSameGrade, cbSameSubject, cbLightLoad, cbBusy, cbRun, cbTotal]) {
-    box.addEventListener('change', () => {
-      if (kind.value === 'REASSIGN') void loadCandidates();
-    });
-  }
-  for (const box of [numRun, numTotal, numSubjectDay]) {
-    box.addEventListener('change', () => {
-      if (kind.value === 'REASSIGN') void loadCandidates();
-    });
-  }
-
   function allTeachers() {
     return (state.refs?.teachers ?? []).filter((t) => t.id !== state.principal?.teacherId);
   }
@@ -1421,8 +1329,9 @@ async function renderNewChange(panel, term, token) {
   async function loadCandidates() {
     const occurrenceId = occurrenceSelect.value;
     if (!occurrenceId) return;
-    // 预览：把界面上当前的筛选条件交给服务端算一遍，不落库。
-    const payload = { termId: term.id, occurrenceId, preference: readPref() };
+    // 不带筛选条件：服务端按"我的偏好 > 全校默认 > 中性默认"算。
+    // 改口径要去设置页，发起调课的屏幕上不摆这些开关。
+    const payload = { termId: term.id, occurrenceId };
     if (kind.value === 'MOVE') {
       payload.toDate = dateField.value;
       payload.toPeriod = Number(periodField.value);
@@ -1530,7 +1439,6 @@ async function renderNewChange(panel, term, token) {
     el('p', { class: 'hint' }, '提交后进入"待确认"，必须由受影响的教师本人逐人确认，系统不会自动视为同意。'),
     el('label', { class: 'field' }, el('span', {}, '课次'), occurrenceSelect),
     el('label', { class: 'field' }, el('span', {}, '变更方式'), kind),
-    filterBox,
     targetTeacher,
     targetMove,
     targetNone,
@@ -1578,6 +1486,172 @@ function renderChangeResult(res) {
         )
       : null,
   );
+}
+
+/* ------------------------------------------------------------------ 设置 */
+
+/**
+ * 候选筛选偏好表单。只在设置页出现：
+ * 发起调课那一刻，屏幕上只该有"这节课、改成什么、给谁"，
+ * 口径是提前想好的事，不该在发起时临时摆弄。
+ */
+function buildPreferenceForm(initial) {
+  const check = (checked) => el('input', { type: 'checkbox', checked });
+  const num = (value) => el('input', { type: 'number', min: '1', max: '20', value: String(value) });
+
+  const cbSameClass = check(initial.considerSameClass);
+  const cbSameGrade = check(initial.considerSameGrade);
+  const cbSameSubject = check(initial.considerSameSubject);
+  const cbLightLoad = check(initial.considerLightLoad);
+  const cbBusy = check(initial.excludeBusyAtSlot);
+  const cbRun = check(initial.excludeConsecutive);
+  const numRun = num(initial.consecutiveLimit);
+  const cbTotal = check(initial.excludeDayTotal);
+  const numTotal = num(initial.dayTotalLimit);
+  const numSubjectDay = num(initial.classSubjectDayLimit);
+
+  const root = el(
+    'div',
+    { class: 'stack' },
+    el('p', { class: 'hint' }, '排序时考虑（勾选才参与）'),
+    el(
+      'div',
+      { class: 'row' },
+      el('label', { class: 'check' }, cbSameClass, '任教该班'),
+      el('label', { class: 'check' }, cbSameGrade, '任教同年级'),
+      el('label', { class: 'check' }, cbSameSubject, '任教同一科目'),
+      el('label', { class: 'check' }, cbLightLoad, '当天课时少'),
+    ),
+    el('p', { class: 'hint' }, '直接不列出（勾选才隐藏；被隐藏者仍会连同原因说明）'),
+    el(
+      'div',
+      { class: 'row' },
+      el('label', { class: 'check' }, cbBusy, '该节次本人有课'),
+      el('label', { class: 'check' }, cbRun, '接手后连上 ≥', numRun, '节'),
+    ),
+    el('div', { class: 'row' }, el('label', { class: 'check' }, cbTotal, '接手后当天超过', numTotal, '节')),
+    el('p', { class: 'hint' }, '该班当天同一科目达到', numSubjectDay, '节时提示（只提示，不排除）。'),
+  );
+
+  return {
+    root,
+    read() {
+      return {
+        considerSameClass: cbSameClass.checked,
+        considerSameGrade: cbSameGrade.checked,
+        considerSameSubject: cbSameSubject.checked,
+        considerLightLoad: cbLightLoad.checked,
+        excludeBusyAtSlot: cbBusy.checked,
+        excludeConsecutive: cbRun.checked,
+        consecutiveLimit: Number(numRun.value),
+        excludeDayTotal: cbTotal.checked,
+        dayTotalLimit: Number(numTotal.value),
+        hintClassSubjectDay: true,
+        classSubjectDayLimit: Number(numSubjectDay.value),
+      };
+    },
+  };
+}
+
+function neutralPreferenceInput() {
+  return {
+    considerSameClass: true,
+    considerSameGrade: true,
+    considerSameSubject: true,
+    considerLightLoad: true,
+    excludeBusyAtSlot: false,
+    excludeConsecutive: false,
+    consecutiveLimit: 3,
+    excludeDayTotal: false,
+    dayTotalLimit: 6,
+    hintClassSubjectDay: true,
+    classSubjectDayLimit: 2,
+  };
+}
+
+const PREF_SOURCE_LABEL = { TEACHER: '我的偏好', SCHOOL_DEFAULT: '全校默认', NEUTRAL: '系统默认（不做减法）' };
+
+async function renderSettings(view, token) {
+  const res = await api('/api/preferences/change');
+  if (token !== state.renderToken) return;
+  const data = res.data.ok ? res.data : null;
+  const pref = data?.preference ?? null;
+  const initial = pref
+    ? {
+        considerSameClass: pref.consider?.sameClass ?? true,
+        considerSameGrade: pref.consider?.sameGrade ?? true,
+        considerSameSubject: pref.consider?.sameSubject ?? true,
+        considerLightLoad: pref.consider?.lightLoad ?? true,
+        excludeBusyAtSlot: pref.exclude?.busyAtSlot ?? false,
+        excludeConsecutive: pref.exclude?.consecutive ?? false,
+        consecutiveLimit: pref.exclude?.consecutiveLimit ?? 3,
+        excludeDayTotal: pref.exclude?.dayTotal ?? false,
+        dayTotalLimit: pref.exclude?.dayTotalLimit ?? 6,
+        classSubjectDayLimit: pref.hint?.classSubjectDayLimit ?? 2,
+      }
+    : neutralPreferenceInput();
+
+  const form = buildPreferenceForm(initial);
+  const result = el('div');
+
+  const saveMine = el('button', { type: 'button', class: 'btn primary' }, '保存为我的偏好');
+  saveMine.addEventListener('click', async () => {
+    const r = await api('/api/preferences/change', { method: 'PUT', body: form.read() });
+    toast(
+      r.data.ok
+        ? '已保存为我的筛选偏好，发起调课时按这个口径推荐。'
+        : `保存失败（${r.data.code ?? r.status}）`,
+      !r.data.ok,
+    );
+  });
+
+  const saveSchool = el('button', { type: 'button', class: 'btn' }, '设为全校默认');
+  saveSchool.addEventListener('click', async () => {
+    const r = await api('/api/preferences/change/school', { method: 'PUT', body: form.read() });
+    toast(
+      r.data.ok
+        ? '已保存为全校默认筛选（教师仍可在自己的偏好里覆盖）。'
+        : `保存失败（${r.data.code ?? r.status}）`,
+      !r.data.ok,
+    );
+  });
+
+  const canEditSchool = data?.canEditSchool === true;
+  const hasTeacher = Boolean(state.principal?.teacherId);
+
+  view.append(
+    el(
+      'div',
+      { class: 'page-head' },
+      el('h2', {}, '设置'),
+      el('p', { class: 'hint' }, '这里只改"怎么给你看"，不改业务规则；改完在下一次发起调课时生效。'),
+    ),
+    el(
+      'div',
+      { class: 'card' },
+      el(
+        'div',
+        { class: 'row' },
+        el('h3', { class: 'grow' }, '调课候选筛选'),
+        badge(PREF_SOURCE_LABEL[data?.source] ?? '当前口径未知', data?.source === 'NEUTRAL' ? null : 'brand'),
+      ),
+      el(
+        'p',
+        { class: 'hint' },
+        '只影响给你看的排序与显示；不影响谁必须确认，也不改变冲突判定。课务管理人员可设全校默认，教师可各自覆盖。',
+      ),
+      form.root,
+      el('div', { class: 'divider' }),
+      el('div', { class: 'row mt10' }, hasTeacher ? saveMine : null, canEditSchool ? saveSchool : null),
+      hasTeacher
+        ? null
+        : el('p', { class: 'hint' }, '当前身份没有教师档案，个人偏好不适用；仅可维护全校默认。'),
+      result,
+    ),
+  );
+  if (!data) {
+    result.append(notice(`未能读取当前偏好（${res.data.code ?? res.status}），下面显示的是系统默认，保存会覆盖它。`, 'warn'));
+  }
 }
 
 /* ------------------------------------------------------------------ 应急 */

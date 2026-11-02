@@ -127,6 +127,23 @@ export function parsePreferenceInput(raw: unknown): PreferenceInput | null {
   };
 }
 
+/** 嵌套结构 → 接口扁平字段。用于"不传就用生效的那套"时回填给界面。 */
+export function preferenceToInput(pref: CandidatePreference): PreferenceInput {
+  return {
+    considerSameClass: pref.consider.sameClass,
+    considerSameGrade: pref.consider.sameGrade,
+    considerSameSubject: pref.consider.sameSubject,
+    considerLightLoad: pref.consider.lightLoad,
+    excludeBusyAtSlot: pref.exclude.busyAtSlot,
+    excludeConsecutive: pref.exclude.consecutive,
+    consecutiveLimit: pref.exclude.consecutiveLimit,
+    excludeDayTotal: pref.exclude.dayTotal,
+    dayTotalLimit: pref.exclude.dayTotalLimit,
+    hintClassSubjectDay: pref.hint.classSubjectDay,
+    classSubjectDayLimit: pref.hint.classSubjectDayLimit,
+  };
+}
+
 export class ChangePreferenceService {
   private readonly now: () => string;
 
@@ -144,6 +161,11 @@ export class ChangePreferenceService {
     if (mine) return { preference: recordToPreference(mine), source: 'TEACHER', school, mine };
     if (school) return { preference: recordToPreference(school), source: 'SCHOOL_DEFAULT', school, mine: null };
     return { preference: NEUTRAL_PREFERENCE, source: 'NEUTRAL', school: null, mine: null };
+  }
+
+  /** 生效偏好的扁平形式：发起调课时界面不带筛选条件，就用这一套。 */
+  effectiveInput(teacherId: string | null): PreferenceInput {
+    return preferenceToInput(this.effective(teacherId).preference);
   }
 
   saveTeacher(teacherId: string, input: PreferenceInput): PreferenceRecord {

@@ -393,7 +393,12 @@ export function createHandler(deps: AppDeps): RequestListener {
       const termId = typeof body.termId === 'string' ? body.termId : '';
       const occurrenceId = typeof body.occurrenceId === 'string' ? body.occurrenceId : '';
       if (termId === '' || occurrenceId === '') return fail(res, 400, 'BAD_INPUT');
-      const input = parsePreferenceInput(body.preference);
+      // 不传 preference 就用调用者生效的那套（个人 > 全校 > 中性）。
+      // 传了就按传来的算：形状不对一律 400，不静默补全。
+      const input =
+        body.preference === undefined
+          ? preferences.effectiveInput(principal.teacherId)
+          : parsePreferenceInput(body.preference);
       if (input === null) return fail(res, 400, 'BAD_INPUT');
       const toDate = typeof body.toDate === 'string' ? body.toDate : null;
       const rawPeriod = body.toPeriod;

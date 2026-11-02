@@ -147,3 +147,5 @@ P7I-7,调课,被排除的教师必须连同原因返回，不得悄悄消失,doc
 P7I-8,调课,全校默认属 L1 参数：课务管理人员可改，管理员不代管,docs/13 §7.3,P7I,,tests/server/http.spec.ts,verified
 P7I-9,调课,偏好不写审计链，且不影响确认集合与冲突判定,docs/13 §7.3,P7I,,src/service/change-preference-service.ts,verified
 P7I-10,调课,换时间的方案按目标时段评估，不按原时段,docs/13 §7.1,P7I,,tests/service/candidate.spec.ts,verified
+P7I-11,调课,偏好入口只在设置页；发起调课的页面不摆筛选开关,docs/13 §7.4,P7I,,tests/ui/render.spec.ts,verified
+P7I-12,调课,候选预览不带筛选条件时按调用者生效偏好计算,docs/13 §7.4,P7I,,tests/server/http.spec.ts,verified

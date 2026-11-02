@@ -551,6 +551,45 @@ describe('页面渲染（最小 DOM）', () => {
     expect(harness.requests).toContain('/api/changes');
   });
 
+  it('筛选偏好只放在设置页：调课页不出现开关，点顶栏"设置"才进得去', async () => {
+    const harness = createHarness(
+      {
+        '/api/me': { ok: true, principal: PRINCIPAL },
+        '/api/meta': META,
+        '/api/timetable/me': VIEW,
+        '/api/changes/mine': { ok: true, submitted: [], awaiting: [] },
+        '/api/refs': { ok: true, teachers: [{ id: 'T02', name: '示例教师乙' }], classes: [], subjects: [] },
+        '/api/changes/candidates/preview': { ok: true, candidates: [], excluded: [] },
+        '/api/preferences/change': {
+          ok: true,
+          source: 'NEUTRAL',
+          preference: {
+            consider: { sameClass: true, sameGrade: true, sameSubject: true, lightLoad: true },
+            exclude: { busyAtSlot: false, consecutive: false, consecutiveLimit: 3, dayTotal: false, dayTotalLimit: 6 },
+            hint: { classSubjectDay: true, classSubjectDayLimit: 2 },
+          },
+          canEditSchool: false,
+        },
+      },
+      'token-1',
+    );
+    await harness.flush();
+    const app = harness.document.getElementById('app') as FakeNode;
+
+    findByText(app, '调课')?.dispatch('click');
+    await harness.flush();
+    findByText(app, '新建方案')?.dispatch('click');
+    await harness.flush();
+    // 发起调课的屏幕上只有"这节课、改成什么、给谁"
+    expect(textOf(app)).not.toContain('调课候选筛选');
+    expect(textOf(app)).not.toContain('保存为我的偏好');
+
+    findByText(app, '设置')?.dispatch('click');
+    await harness.flush();
+    expect(textOf(app)).toContain('调课候选筛选');
+    expect(textOf(app)).toContain('保存为我的偏好');
+  });
+
   it('管理员可见系统状态入口，教师不可见', async () => {
     const teacher = createHarness(
       {

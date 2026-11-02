@@ -597,4 +597,30 @@ describe('调课候选筛选偏好接口', () => {
     const totalTeachers = (await call('/api/refs', { token })).body.teachers as unknown[];
     expect(kept.length + dropped.length).toBe(totalTeachers.length - 1);
   });
+
+  it('预览不带筛选条件时，按调用者生效的那套偏好算', async () => {
+    const token = await loginThroughHttp('teacher01', TEACHER_PW);
+    const mine = await call(`/api/timetable/me?termId=${TERM}&from=${FROM}&to=${TO}`, { token });
+    const occurrenceId = (mine.body.view as { rows: Array<{ occurrenceId: string; cancelled: boolean }> }).rows.find(
+      (r) => !r.cancelled,
+    )?.occurrenceId;
+    expect(occurrenceId).toBeTruthy();
+
+    const saved = await call('/api/preferences/change', {
+      method: 'PUT',
+      token,
+      body: { ...PREF, excludeBusyAtSlot: true },
+    });
+    expect(saved.status).toBe(200);
+
+    const r = await call('/api/changes/candidates/preview', {
+      method: 'POST',
+      token,
+      body: { termId: TERM, occurrenceId },
+    });
+    expect(r.status).toBe(200);
+    const kept = r.body.candidates as Array<{ freeAtSlot: boolean }>;
+    expect(kept.length).toBeGreaterThan(0);
+    expect(kept.every((c) => c.freeAtSlot)).toBe(true);
+  });
 });
