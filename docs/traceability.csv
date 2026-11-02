@@ -149,3 +149,5 @@ P7I-9,调课,偏好不写审计链，且不影响确认集合与冲突判定,doc
 P7I-10,调课,换时间的方案按目标时段评估，不按原时段,docs/13 §7.1,P7I,,tests/service/candidate.spec.ts,verified
 P7I-11,调课,偏好入口只在设置页；发起调课的页面不摆筛选开关,docs/13 §7.4,P7I,,tests/ui/render.spec.ts,verified
 P7I-12,调课,候选预览不带筛选条件时按调用者生效偏好计算,docs/13 §7.4,P7I,,tests/server/http.spec.ts,verified
+P7I-13,调课,候选不可用时不得回落全校名单：说明原因、禁止提交,docs/13 §7.5,P7I,,tests/ui/render.spec.ts,verified
+P7I-14,调课,预览不传筛选条件时按调用者生效偏好计算，来源如实,docs/13 §7.4,P7I,,tests/server/http.spec.ts,verified

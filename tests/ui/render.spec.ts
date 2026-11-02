@@ -80,6 +80,11 @@ function createHarness(routes: Record<string, unknown>, token: string | null): H
         if (kid === null || kid === undefined || kid === false) continue;
         if (kid instanceof Node) {
           this.children.push(kid as FakeNode);
+          // 真实浏览器里 select 默认选中第一个 option。替身必须保持同一行为，
+          // 否则"按当前选中的课次取候选"这类逻辑在测试里永远走不到（value 恒为空）。
+          if (this.tagName === 'select' && this.value === '' && kid.tagName === 'option') {
+            this.value = kid.getAttribute('value') ?? '';
+          }
         } else {
           const textNode = new Node('#text') as unknown as FakeNode;
           textNode.textContent = String(kid);
@@ -549,6 +554,47 @@ describe('页面渲染（最小 DOM）', () => {
     form?.dispatch('submit');
     await harness.flush();
     expect(harness.requests).toContain('/api/changes');
+  });
+
+  it('候选拿不到时不回落全校名单：说明原因、禁止提交', async () => {
+    const harness = createHarness(
+      {
+        '/api/me': { ok: true, principal: PRINCIPAL },
+        '/api/meta': META,
+        '/api/timetable/me': VIEW,
+        '/api/changes/mine': { ok: true, submitted: [], awaiting: [] },
+        '/api/refs': { ok: true, teachers: [{ id: 'T02', name: '示例教师乙' }], classes: [], subjects: [] },
+        // 未改密的账号拿不到候选：这正是最容易退化成"全校名单平铺"的场景
+        '/api/changes/candidates/preview': {
+          status: 403,
+          body: { ok: false, code: 'PASSWORD_CHANGE_REQUIRED' },
+        },
+        '/api/changes': { ok: true, caseId: 'CASE-1', status: 'PENDING', required: [] },
+      },
+      'token-1',
+    );
+    await harness.flush();
+    const app = harness.document.getElementById('app') as FakeNode;
+    findByText(app, '调课')?.dispatch('click');
+    await harness.flush();
+    findByText(app, '新建方案')?.dispatch('click');
+    await harness.flush();
+
+    const trigger = findByText(app, '候选不可用');
+    expect(trigger).not.toBeNull();
+    expect(trigger?.disabled).toBe(true);
+    trigger?.dispatch('click');
+    await harness.flush();
+
+    const list = findByClass(app, 'picker-list') as FakeNode;
+    expect(textOf(list)).toContain('请先修改初始口令');
+    // 全校名单绝不能在这种时候被铺出来
+    expect(textOf(list)).not.toContain('示例教师乙');
+
+    const form = findAllTag(app, 'form').find((f) => textOf(f).includes('新建调课方案'));
+    form?.dispatch('submit');
+    await harness.flush();
+    expect(harness.requests).not.toContain('/api/changes');
   });
 
   it('筛选偏好只放在设置页：调课页不出现开关，点顶栏"设置"才进得去', async () => {

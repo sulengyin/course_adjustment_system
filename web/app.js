@@ -1194,6 +1194,13 @@ async function renderNewChange(panel, term, token) {
   let candidates = [];
   let excluded = [];
   let selectedTeacherId = '';
+  /**
+   * 候选名单的就绪状态。
+   * 候选没算出来时绝不回落到"全校名单平铺"：宁可空着并说明原因，
+   * 也不能让老师在一百多个名字里盲选——那等于把冲突留到提交之后才暴露。
+   */
+  let candidateState = 'loading';
+  let candidateError = '';
 
   const teacherSearch = el('input', { type: 'search', class: 'picker-search', placeholder: '输入姓名过滤' });
   const teacherList = el('div', { class: 'picker-list' });
@@ -1216,14 +1223,7 @@ async function renderNewChange(panel, term, token) {
 
   /** 分组只用于显示顺序，选择不受限：三组之外的人同样能选。 */
   function grouped() {
-    if (candidates.length === 0) {
-      return [
-        {
-          label: '全部教师（候选推荐不可用，请自行核对对方该节次是否有课）',
-          rows: allTeachers().map((t) => ({ teacherId: t.id, teacherName: t.name, reasons: [] })),
-        },
-      ];
-    }
+    if (candidates.length === 0) return [];
     const recommended = candidates.filter((c) => c.freeAtSlot);
     const needSwap = candidates.filter((c) => !c.freeAtSlot && (c.teachesSubject || c.tier !== 'CROSS_GRADE'));
     const others = candidates.filter((c) => !c.freeAtSlot && !c.teachesSubject && c.tier === 'CROSS_GRADE');
@@ -1236,6 +1236,15 @@ async function renderNewChange(panel, term, token) {
 
   function renderTeacherList() {
     clear(teacherList);
+    if (candidateState !== 'ready') {
+      teacherList.append(el('p', { class: 'picker-empty' }, candidateState === 'loading' ? '正在按规则计算候选…' : candidateError));
+      if (candidateState === 'error') {
+        const retry = el('button', { type: 'button', class: 'btn ghost' }, '重试');
+        retry.addEventListener('click', () => void loadCandidates());
+        teacherList.append(retry);
+      }
+      return;
+    }
     const keyword = teacherSearch.value.trim();
     let shown = 0;
     for (const group of grouped()) {
@@ -1326,9 +1335,46 @@ async function renderNewChange(panel, term, token) {
     excludedHint.textContent = `按当前筛选，另有 ${excluded.length} 位教师未列出：${shown.join('、')}${rest > 0 ? ` 等 ${excluded.length} 位` : ''}。取消勾选即可重新看到。`;
   }
 
+  /** 候选不可用时把服务端原因说成人话，并且明确告诉老师"没有给你全量名单"。 */
+  function candidateErrorText(code, status) {
+    switch (code) {
+      case 'PASSWORD_CHANGE_REQUIRED':
+        return '请先修改初始口令，之后才能发起调课。';
+      case 'NOT_A_TEACHER':
+        return '当前账号没有关联教师档案，不能发起调课。';
+      case 'NOT_OWNER':
+        return '只能对自己任教的课次发起调课。';
+      case 'OCCURRENCE_CANCELLED':
+        return '该课次已停课，不能再发起调课。';
+      case 'OCCURRENCE_NOT_FOUND':
+        return '课次不存在或已不在本学期范围内，请重新选择。';
+      case 'FORBIDDEN':
+        return '当前身份不能发起调课。';
+      case 'BAD_INPUT':
+        return '请求缺少必要信息，请重新选择课次。';
+      case 'NO_OCCURRENCE':
+        return '请先选择要调整的课次，系统才能按规则给出候选。';
+      default:
+        return `候选推荐暂时不可用（${code ?? status ?? '未知原因'}）。已停止列出全校名单，请重试或联系课务管理人员。`;
+    }
+  }
+
+  function setCandidateState(next, code, status) {
+    candidateState = next;
+    candidateError = next === 'error' ? candidateErrorText(code, status) : '';
+    teacherTrigger.disabled = next !== 'ready';
+    if (next === 'loading') teacherTrigger.textContent = '正在计算候选…';
+    else if (next === 'error') teacherTrigger.textContent = '候选不可用';
+    else setTeacher(selectedTeacherId);
+    if (!teacherPanel.hidden) renderTeacherList();
+  }
+
   async function loadCandidates() {
     const occurrenceId = occurrenceSelect.value;
-    if (!occurrenceId) return;
+    if (!occurrenceId) {
+      setCandidateState('error', 'NO_OCCURRENCE');
+      return;
+    }
     // 不带筛选条件：服务端按"我的偏好 > 全校默认 > 中性默认"算。
     // 改口径要去设置页，发起调课的屏幕上不摆这些开关。
     const payload = { termId: term.id, occurrenceId };
@@ -1336,17 +1382,26 @@ async function renderNewChange(panel, term, token) {
       payload.toDate = dateField.value;
       payload.toPeriod = Number(periodField.value);
     }
-    const r = await api('/api/changes/candidates/preview', { method: 'POST', body: payload });
-    if (token !== state.renderToken) return;
-    candidates = r.data.ok ? (r.data.candidates ?? []) : [];
-    excluded = r.data.ok ? (r.data.excluded ?? []) : [];
-    // 名单开着就立即重画；关着时交给打开时渲染，避免无谓重排。
-    if (!teacherPanel.hidden) renderTeacherList();
-    renderExcluded();
-    if (!r.data.ok) {
-      candidateHint.textContent = `候选推荐不可用（${r.data.code ?? r.status}），下列为全部教师，请自行核对。`;
+    setCandidateState('loading');
+    let r;
+    try {
+      r = await api('/api/changes/candidates/preview', { method: 'POST', body: payload });
+    } catch {
+      if (token === state.renderToken) setCandidateState('error', 'NETWORK');
       return;
     }
+    if (token !== state.renderToken) return;
+    if (!r.data.ok) {
+      candidates = [];
+      excluded = [];
+      setCandidateState('error', r.data.code, r.status);
+      renderExcluded();
+      return;
+    }
+    candidates = r.data.candidates ?? [];
+    excluded = r.data.excluded ?? [];
+    setCandidateState('ready');
+    renderExcluded();
     syncHint();
   }
 
@@ -1406,11 +1461,19 @@ async function renderNewChange(panel, term, token) {
       onsubmit: async (event) => {
         event.preventDefault();
         const occurrenceId = occurrenceSelect.value;
-        // 除"调整时间""停课"外都要指定教师；没选就提交只会在服务端才报错，不如在界面上先说清楚。
-        if (kind.value !== 'MOVE' && kind.value !== 'CANCEL' && selectedTeacherId === '') {
-          clear(result);
-          result.append(notice('请先选择要改派给的教师。', 'warn'));
-          return;
+        // 除"调整时间""停课"外都要指定教师。候选没算出来时不让提交：
+        // 此时系统不知道谁能接这节课，硬提交只会把冲突推给对方和审批人。
+        if (kind.value !== 'MOVE' && kind.value !== 'CANCEL') {
+          if (candidateState !== 'ready') {
+            clear(result);
+            result.append(notice(candidateError || '候选名单尚未就绪，请稍候再试。', 'warn'));
+            return;
+          }
+          if (selectedTeacherId === '') {
+            clear(result);
+            result.append(notice('请先选择要改派给的教师。', 'warn'));
+            return;
+          }
         }
         const payload = {
           termId: term.id,

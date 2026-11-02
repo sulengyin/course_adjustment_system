@@ -395,11 +395,11 @@ export function createHandler(deps: AppDeps): RequestListener {
       if (termId === '' || occurrenceId === '') return fail(res, 400, 'BAD_INPUT');
       // 不传 preference 就用调用者生效的那套（个人 > 全校 > 中性）。
       // 传了就按传来的算：形状不对一律 400，不静默补全。
-      const input =
-        body.preference === undefined
-          ? preferences.effectiveInput(principal.teacherId)
-          : parsePreferenceInput(body.preference);
-      if (input === null) return fail(res, 400, 'BAD_INPUT');
+      // 调用方没给筛选条件时，连 preference 都不传：让服务层按"个人 > 全校 > 中性"自己取，
+      // 这样返回里的 preferenceSource 说的才是真正在用的那套口径。
+      const explicit = body.preference !== undefined;
+      const input = explicit ? parsePreferenceInput(body.preference) : null;
+      if (explicit && input === null) return fail(res, 400, 'BAD_INPUT');
       const toDate = typeof body.toDate === 'string' ? body.toDate : null;
       const rawPeriod = body.toPeriod;
       if (rawPeriod !== undefined && rawPeriod !== null && !Number.isInteger(rawPeriod)) {
@@ -408,7 +408,7 @@ export function createHandler(deps: AppDeps): RequestListener {
       const suggestion = candidates.suggest(termId, occurrenceId, principal, {
         toDate,
         toPeriod: typeof rawPeriod === 'number' ? rawPeriod : null,
-        preference: inputToPreference(input),
+        ...(input === null ? {} : { preference: inputToPreference(input) }),
       });
       send(res, suggestion.ok ? 200 : 404, suggestion as unknown as Json);
       return;
