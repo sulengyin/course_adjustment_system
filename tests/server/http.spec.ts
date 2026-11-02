@@ -482,3 +482,119 @@ describe('调课候选接口', () => {
     expect(r.body.code).toBe('NOT_OWNER');
   });
 });
+
+describe('调课候选筛选偏好接口', () => {
+  const PREF = {
+    considerSameClass: true,
+    considerSameGrade: true,
+    considerSameSubject: true,
+    considerLightLoad: true,
+    excludeBusyAtSlot: false,
+    excludeConsecutive: false,
+    consecutiveLimit: 3,
+    excludeDayTotal: false,
+    dayTotalLimit: 6,
+    hintClassSubjectDay: true,
+    classSubjectDayLimit: 2,
+  };
+
+  it('初始为中性默认；教师保存后变成自己的偏好', async () => {
+    const token = await loginThroughHttp('teacher01', TEACHER_PW);
+    const first = await call('/api/preferences/change', { token });
+    expect(first.status).toBe(200);
+    expect(first.body.source).toBe('NEUTRAL');
+
+    const saved = await call('/api/preferences/change', { method: 'PUT', token, body: PREF });
+    expect(saved.status).toBe(200);
+
+    const again = await call('/api/preferences/change', { token });
+    expect(again.body.source).toBe('TEACHER');
+  });
+
+  it('形状不对的偏好一律 400，不静默补全', async () => {
+    const token = await loginThroughHttp('teacher01', TEACHER_PW);
+    const bad = await call('/api/preferences/change', {
+      method: 'PUT',
+      token,
+      body: { ...PREF, consecutiveLimit: 0 },
+    });
+    expect(bad.status).toBe(400);
+  });
+
+  it('教师不能改全校默认；管理员也不代管课务参数', async () => {
+    const teacherToken = await loginThroughHttp('teacher01', TEACHER_PW);
+    const byTeacher = await call('/api/preferences/change/school', {
+      method: 'PUT',
+      token: teacherToken,
+      body: PREF,
+    });
+    expect(byTeacher.status).toBe(403);
+
+    const adminToken = await loginThroughHttp('admin', 'Admin!Pass2026x', 'A');
+    const byAdmin = await call('/api/preferences/change/school', {
+      method: 'PUT',
+      token: adminToken,
+      body: PREF,
+    });
+    expect(byAdmin.status).toBe(403);
+    expect(byAdmin.body.code).toBe('FORBIDDEN');
+  });
+
+  it('课务管理人员可以设全校默认，未设个人偏好的账号随即沿用', async () => {
+    const asAdmin = auth.login('admin', 'Admin!Pass2026x', 'A');
+    if (!asAdmin.ok) throw new Error('admin login failed');
+    if (!asAdmin.principal.roles.includes('S')) {
+      auth.grantRole(asAdmin.principal, asAdmin.principal.userId, 'S');
+    }
+    const schoolToken = await loginThroughHttp('admin', 'Admin!Pass2026x', 'S');
+    const saved = await call('/api/preferences/change/school', {
+      method: 'PUT',
+      token: schoolToken,
+      body: { ...PREF, excludeBusyAtSlot: true },
+    });
+    expect(saved.status).toBe(200);
+
+    // 管理员没有教师身份，读到的生效来源只能是全校默认
+    const adminToken = await loginThroughHttp('admin', 'Admin!Pass2026x', 'A');
+    const seen = await call('/api/preferences/change', { token: adminToken });
+    expect(seen.body.source).toBe('SCHOOL_DEFAULT');
+  });
+
+  it('候选预览：勾选排除后只留能直接接下的，被排除者连同原因返回', async () => {
+    const token = await loginThroughHttp('teacher01', TEACHER_PW);
+    // 找一节"同一时段还有别的教师有课"的课，才能观察到排除效果
+    const mine = await call(`/api/timetable/me?termId=${TERM}&from=${FROM}&to=${TO}`, { token });
+    const mineRows = (mine.body.view as { rows: Array<{ occurrenceId: string; date: string; period: number }> }).rows;
+    const occurrenceId = mineRows.find((r) =>
+      db
+        .queryAll(TERM, r.date, r.date)
+        .some((o) => o.occurrenceId !== r.occurrenceId && o.period === r.period && !o.cancelled),
+    )?.occurrenceId;
+    expect(occurrenceId).toBeTruthy();
+
+    const all = await call('/api/changes/candidates/preview', {
+      method: 'POST',
+      token,
+      body: { termId: TERM, occurrenceId, preference: PREF },
+    });
+    expect(all.status).toBe(200);
+    expect((all.body.excluded as unknown[]).length).toBe(0);
+
+    const filtered = await call('/api/changes/candidates/preview', {
+      method: 'POST',
+      token,
+      body: { termId: TERM, occurrenceId, preference: { ...PREF, excludeBusyAtSlot: true } },
+    });
+    expect(filtered.status).toBe(200);
+    const kept = filtered.body.candidates as Array<{ freeAtSlot: boolean }>;
+    expect(kept.every((c) => c.freeAtSlot)).toBe(true);
+    const dropped = filtered.body.excluded as Array<{ teacherId: string; reasons: string[] }>;
+    // 被排除的人必须连同原因返回，不允许悄悄消失
+    for (const d of dropped) {
+      expect(d.reasons.join('；')).toContain('该节次本人有课');
+      expect(d.teacherId).toBeTruthy();
+    }
+    const totalTeachers = (await call('/api/refs', { token })).body.teachers as unknown[];
+    expect(kept.length + dropped.length).toBe(totalTeachers.length - 1);
+  });
+});

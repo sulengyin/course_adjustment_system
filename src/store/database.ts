@@ -272,6 +272,28 @@ CREATE TABLE IF NOT EXISTS assignment_state (
   updated_at    TEXT NOT NULL
 );
 
+-- 调课候选筛选偏好：SCHOOL 为全校默认（teacher_id 固定空串），TEACHER 为教师个人覆盖。
+-- 只影响"给发起人看的排序与显示"，不参与确认集合与冲突判定。
+CREATE TABLE IF NOT EXISTS change_preference (
+  scope                    TEXT NOT NULL CHECK (scope IN ('SCHOOL','TEACHER')),
+  teacher_id               TEXT NOT NULL,
+  consider_same_class      INTEGER NOT NULL CHECK (consider_same_class IN (0,1)),
+  consider_same_grade      INTEGER NOT NULL CHECK (consider_same_grade IN (0,1)),
+  consider_same_subject    INTEGER NOT NULL CHECK (consider_same_subject IN (0,1)),
+  consider_light_load      INTEGER NOT NULL CHECK (consider_light_load IN (0,1)),
+  exclude_busy_at_slot     INTEGER NOT NULL CHECK (exclude_busy_at_slot IN (0,1)),
+  exclude_consecutive      INTEGER NOT NULL CHECK (exclude_consecutive IN (0,1)),
+  consecutive_limit        INTEGER NOT NULL CHECK (consecutive_limit BETWEEN 1 AND 20),
+  exclude_day_total        INTEGER NOT NULL CHECK (exclude_day_total IN (0,1)),
+  day_total_limit          INTEGER NOT NULL CHECK (day_total_limit BETWEEN 1 AND 20),
+  hint_class_subject_day   INTEGER NOT NULL CHECK (hint_class_subject_day IN (0,1)),
+  class_subject_day_limit  INTEGER NOT NULL CHECK (class_subject_day_limit BETWEEN 1 AND 20),
+  updated_at               TEXT NOT NULL,
+  updated_by               TEXT NOT NULL,
+  PRIMARY KEY (scope, teacher_id),
+  CHECK ((scope = 'SCHOOL' AND teacher_id = '') OR (scope = 'TEACHER' AND teacher_id <> ''))
+);
+
 -- 执行事实：只有显式登记才有记录，系统不按时间推断
 CREATE TABLE IF NOT EXISTS execution_fact (
   occurrence_id TEXT PRIMARY KEY,
@@ -373,6 +395,63 @@ export interface TimetableRow {
   readonly dataOrigin: DataOrigin;
   /** 已生效方案把该课次停掉：仍列出，但不得计入"有课" */
   readonly cancelled: boolean;
+}
+
+/** 调课候选筛选偏好；扁平列，禁止用 `as` 把 snake_case 行直接当驼峰对象。 */
+export interface PreferenceRecord {
+  readonly scope: 'SCHOOL' | 'TEACHER';
+  readonly teacherId: string;
+  readonly considerSameClass: boolean;
+  readonly considerSameGrade: boolean;
+  readonly considerSameSubject: boolean;
+  readonly considerLightLoad: boolean;
+  readonly excludeBusyAtSlot: boolean;
+  readonly excludeConsecutive: boolean;
+  readonly consecutiveLimit: number;
+  readonly excludeDayTotal: boolean;
+  readonly dayTotalLimit: number;
+  readonly hintClassSubjectDay: boolean;
+  readonly classSubjectDayLimit: number;
+  readonly updatedAt: string;
+  readonly updatedBy: string;
+}
+
+interface PreferenceRow {
+  scope: string;
+  teacher_id: string;
+  consider_same_class: number;
+  consider_same_grade: number;
+  consider_same_subject: number;
+  consider_light_load: number;
+  exclude_busy_at_slot: number;
+  exclude_consecutive: number;
+  consecutive_limit: number;
+  exclude_day_total: number;
+  day_total_limit: number;
+  hint_class_subject_day: number;
+  class_subject_day_limit: number;
+  updated_at: string;
+  updated_by: string;
+}
+
+function toPreference(r: PreferenceRow): PreferenceRecord {
+  return {
+    scope: r.scope === 'SCHOOL' ? 'SCHOOL' : 'TEACHER',
+    teacherId: r.teacher_id,
+    considerSameClass: r.consider_same_class === 1,
+    considerSameGrade: r.consider_same_grade === 1,
+    considerSameSubject: r.consider_same_subject === 1,
+    considerLightLoad: r.consider_light_load === 1,
+    excludeBusyAtSlot: r.exclude_busy_at_slot === 1,
+    excludeConsecutive: r.exclude_consecutive === 1,
+    consecutiveLimit: r.consecutive_limit,
+    excludeDayTotal: r.exclude_day_total === 1,
+    dayTotalLimit: r.day_total_limit,
+    hintClassSubjectDay: r.hint_class_subject_day === 1,
+    classSubjectDayLimit: r.class_subject_day_limit,
+    updatedAt: r.updated_at,
+    updatedBy: r.updated_by,
+  };
 }
 
 interface RawTimetableRow {
@@ -544,6 +623,7 @@ export class CourseDatabase {
       'change_required',
       'change_item',
       'change_case',
+      'change_preference',
       'revocation_marker',
       'import_row',
       'import_batch',
@@ -1028,6 +1108,64 @@ export class CourseDatabase {
     const out: Record<string, string> = {};
     for (const r of rows) if (r.grade !== null && r.grade !== '') out[r.id] = r.grade;
     return out;
+  }
+
+  /** 读一条偏好；没有记录返回 null（由调用方决定用中性默认）。 */
+  getPreference(scope: 'SCHOOL' | 'TEACHER', teacherId: string): PreferenceRecord | null {
+    const row = this.db
+      .prepare(
+        `SELECT scope, teacher_id, consider_same_class, consider_same_grade, consider_same_subject,
+                consider_light_load, exclude_busy_at_slot, exclude_consecutive, consecutive_limit,
+                exclude_day_total, day_total_limit, hint_class_subject_day, class_subject_day_limit,
+                updated_at, updated_by
+           FROM change_preference WHERE scope = ? AND teacher_id = ?`,
+      )
+      .get(scope, scope === 'SCHOOL' ? '' : teacherId) as unknown as PreferenceRow | undefined;
+    return row === undefined ? null : toPreference(row);
+  }
+
+  /** 写入偏好。SCHOOL 行只有一行（teacher_id 固定空串），TEACHER 行按教师一人一行。 */
+  upsertPreference(record: PreferenceRecord): void {
+    this.db
+      .prepare(
+        `INSERT INTO change_preference(
+           scope, teacher_id, consider_same_class, consider_same_grade, consider_same_subject,
+           consider_light_load, exclude_busy_at_slot, exclude_consecutive, consecutive_limit,
+           exclude_day_total, day_total_limit, hint_class_subject_day, class_subject_day_limit,
+           updated_at, updated_by)
+         VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+         ON CONFLICT(scope, teacher_id) DO UPDATE SET
+           consider_same_class = excluded.consider_same_class,
+           consider_same_grade = excluded.consider_same_grade,
+           consider_same_subject = excluded.consider_same_subject,
+           consider_light_load = excluded.consider_light_load,
+           exclude_busy_at_slot = excluded.exclude_busy_at_slot,
+           exclude_consecutive = excluded.exclude_consecutive,
+           consecutive_limit = excluded.consecutive_limit,
+           exclude_day_total = excluded.exclude_day_total,
+           day_total_limit = excluded.day_total_limit,
+           hint_class_subject_day = excluded.hint_class_subject_day,
+           class_subject_day_limit = excluded.class_subject_day_limit,
+           updated_at = excluded.updated_at,
+           updated_by = excluded.updated_by`,
+      )
+      .run(
+        record.scope,
+        record.scope === 'SCHOOL' ? '' : record.teacherId,
+        record.considerSameClass ? 1 : 0,
+        record.considerSameGrade ? 1 : 0,
+        record.considerSameSubject ? 1 : 0,
+        record.considerLightLoad ? 1 : 0,
+        record.excludeBusyAtSlot ? 1 : 0,
+        record.excludeConsecutive ? 1 : 0,
+        record.consecutiveLimit,
+        record.excludeDayTotal ? 1 : 0,
+        record.dayTotalLimit,
+        record.hintClassSubjectDay ? 1 : 0,
+        record.classSubjectDayLimit,
+        record.updatedAt,
+        record.updatedBy,
+      );
   }
 
   createBatch(b: ImportBatchRecord): void {

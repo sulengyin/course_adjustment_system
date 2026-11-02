@@ -98,3 +98,68 @@ describe('调课候选推荐服务', () => {
     expect(result.code).toBe('NOT_A_TEACHER');
   });
 });
+
+describe('调课候选：偏好生效与目标时段', () => {
+  const PREF_BASE = {
+    consider: { sameClass: true, sameGrade: true, sameSubject: true, lightLoad: true },
+    exclude: {
+      busyAtSlot: false,
+      consecutive: false,
+      consecutiveLimit: 3,
+      dayTotal: false,
+      dayTotalLimit: 6,
+    },
+    hint: { classSubjectDay: true, classSubjectDayLimit: 2 },
+  };
+
+  it('默认不隐藏任何人', () => {
+    const occ = firstOccurrence();
+    const result = service.suggest(TERM, occ.occurrenceId, teacher(occ.teacherId));
+    expect(result.excluded).toEqual([]);
+  });
+
+  it('勾选排除后，被排除的教师连同原因返回', () => {
+    const occ = firstOccurrence();
+    const result = service.suggest(TERM, occ.occurrenceId, teacher(occ.teacherId), {
+      preference: {
+        ...PREF_BASE,
+        exclude: { ...PREF_BASE.exclude, busyAtSlot: true },
+      },
+    });
+    const busy = new Set(
+      db
+        .queryAll(TERM, occ.date, occ.date)
+        .filter((r) => !r.cancelled && r.period === occ.period)
+        .map((r) => r.teacherId),
+    );
+    for (const c of result.candidates) expect(c.freeAtSlot).toBe(true);
+    for (const e of result.excluded) {
+      expect(busy.has(e.teacherId)).toBe(true);
+      expect(e.reasons.join('；')).toContain('该节次本人有课');
+      expect(e.teacherName).not.toBeNull();
+    }
+    expect(result.candidates.length + result.excluded.length).toBe(db.refs().teachers.length - 1);
+  });
+
+  it('换时间的方案按目标时段评估，不按原时段', () => {
+    const occ = firstOccurrence();
+    const targetDate = '2026-11-05';
+    const targetPeriod = 2;
+    const result = service.suggest(TERM, occ.occurrenceId, teacher(occ.teacherId), {
+      toDate: targetDate,
+      toPeriod: targetPeriod,
+    });
+    expect(result.ok).toBe(true);
+    expect(result.evaluatedAt).toEqual({ date: targetDate, period: targetPeriod });
+
+    const busy = new Set(
+      db
+        .queryAll(TERM, targetDate, targetDate)
+        .filter((r) => !r.cancelled && r.period === targetPeriod)
+        .map((r) => r.teacherId),
+    );
+    for (const c of result.candidates) {
+      expect(c.freeAtSlot).toBe(!busy.has(c.teacherId));
+    }
+  });
+});

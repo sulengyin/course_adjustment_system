@@ -852,7 +852,11 @@ async function sectionChanges(view, token) {
     view.append(notice('数据库中没有学期数据，无法发起调课。', 'warn'));
     return;
   }
-  const [mine, refs] = await Promise.all([api('/api/changes/mine'), api('/api/refs')]);
+  const [mine, refs, pref] = await Promise.all([
+    api('/api/changes/mine'),
+    api('/api/refs'),
+    api('/api/preferences/change'),
+  ]);
   if (token !== state.renderToken) return;
   if (!mine.data.ok) {
     view.append(notice(`无法读取调课列表（${mine.data.code ?? mine.status}）。`, 'danger'));
@@ -861,6 +865,7 @@ async function sectionChanges(view, token) {
   const submitted = mine.data.submitted ?? [];
   const awaiting = mine.data.awaiting ?? [];
   state.refs = refs.data.ok ? refs.data : { teachers: [], classes: [], subjects: [] };
+  state.pref = pref.data.ok ? pref.data : null;
 
   const tabs = el('div', { class: 'tabs' });
   const panel = el('div');
@@ -1168,7 +1173,115 @@ async function renderNewChange(panel, term, token) {
   const TIER_LABEL = { SAME_CLASS: '任教该班', SAME_GRADE: '任教同年级', CROSS_GRADE: '跨年级' };
   const teacherSelect = el('select', {});
   const candidateHint = el('p', { class: 'hint' });
+  const excludedHint = el('p', { class: 'hint' });
   let candidates = [];
+  let excluded = [];
+
+  /**
+   * 筛选条件：默认取"我的偏好 > 全校默认 > 中性默认"（服务端已算好），
+   * 教师可以在这里临时改，也可以存成自己的偏好。系统不替学校把口径写死。
+   */
+  const serverPref = state.pref?.preference ?? null;
+  const prefState = {
+    considerSameClass: serverPref?.consider?.sameClass ?? true,
+    considerSameGrade: serverPref?.consider?.sameGrade ?? true,
+    considerSameSubject: serverPref?.consider?.sameSubject ?? true,
+    considerLightLoad: serverPref?.consider?.lightLoad ?? true,
+    excludeBusyAtSlot: serverPref?.exclude?.busyAtSlot ?? false,
+    excludeConsecutive: serverPref?.exclude?.consecutive ?? false,
+    consecutiveLimit: serverPref?.exclude?.consecutiveLimit ?? 3,
+    excludeDayTotal: serverPref?.exclude?.dayTotal ?? false,
+    dayTotalLimit: serverPref?.exclude?.dayTotalLimit ?? 6,
+    hintClassSubjectDay: serverPref?.hint?.classSubjectDay ?? true,
+    classSubjectDayLimit: serverPref?.hint?.classSubjectDayLimit ?? 2,
+  };
+
+  const cbSameClass = el('input', { type: 'checkbox', checked: prefState.considerSameClass });
+  const cbSameGrade = el('input', { type: 'checkbox', checked: prefState.considerSameGrade });
+  const cbSameSubject = el('input', { type: 'checkbox', checked: prefState.considerSameSubject });
+  const cbLightLoad = el('input', { type: 'checkbox', checked: prefState.considerLightLoad });
+  const cbBusy = el('input', { type: 'checkbox', checked: prefState.excludeBusyAtSlot });
+  const cbRun = el('input', { type: 'checkbox', checked: prefState.excludeConsecutive });
+  const numRun = el('input', {
+    type: 'number',
+    min: '1',
+    max: '20',
+    value: String(prefState.consecutiveLimit),
+  });
+  const cbTotal = el('input', { type: 'checkbox', checked: prefState.excludeDayTotal });
+  const numTotal = el('input', { type: 'number', min: '1', max: '20', value: String(prefState.dayTotalLimit) });
+  const numSubjectDay = el('input', {
+    type: 'number',
+    min: '1',
+    max: '20',
+    value: String(prefState.classSubjectDayLimit),
+  });
+
+  function readPref() {
+    return {
+      considerSameClass: cbSameClass.checked,
+      considerSameGrade: cbSameGrade.checked,
+      considerSameSubject: cbSameSubject.checked,
+      considerLightLoad: cbLightLoad.checked,
+      excludeBusyAtSlot: cbBusy.checked,
+      excludeConsecutive: cbRun.checked,
+      consecutiveLimit: Number(numRun.value),
+      excludeDayTotal: cbTotal.checked,
+      dayTotalLimit: Number(numTotal.value),
+      hintClassSubjectDay: true,
+      classSubjectDayLimit: Number(numSubjectDay.value),
+    };
+  }
+
+  const saveMine = el('button', { type: 'button', class: 'btn' }, '保存为我的偏好');
+  saveMine.addEventListener('click', async () => {
+    const r = await api('/api/preferences/change', { method: 'PUT', body: readPref() });
+    toast(r.data.ok ? '已保存为我的筛选偏好，下次发起调课默认使用。' : `保存失败（${r.data.code ?? r.status}）`, !r.data.ok);
+  });
+
+  const saveSchool = el('button', { type: 'button', class: 'btn' }, '设为全校默认');
+  saveSchool.addEventListener('click', async () => {
+    const r = await api('/api/preferences/change/school', { method: 'PUT', body: readPref() });
+    toast(
+      r.data.ok ? '已保存为全校默认筛选（教师仍可在自己的偏好里覆盖）。' : `保存失败（${r.data.code ?? r.status}）`,
+      !r.data.ok,
+    );
+  });
+
+  const filterBox = el(
+    'details',
+    { class: 'card' },
+    el('summary', {}, '候选筛选（可选：考虑什么、不考虑谁）'),
+    el('p', { class: 'hint' }, '只影响给你看的排序与显示；不影响谁必须确认，也不改变冲突判定。'),
+    el(
+      'div',
+      { class: 'row' },
+      el('label', { class: 'check' }, cbSameClass, '任教该班'),
+      el('label', { class: 'check' }, cbSameGrade, '任教同年级'),
+      el('label', { class: 'check' }, cbSameSubject, '任教同一科目'),
+      el('label', { class: 'check' }, cbLightLoad, '当天课时少'),
+    ),
+    el(
+      'div',
+      { class: 'row' },
+      el('label', { class: 'check' }, cbBusy, '该节次本人有课'),
+      el('label', { class: 'check' }, cbRun, '接手后连上 ≥', numRun, '节'),
+    ),
+    el('div', { class: 'row' }, el('label', { class: 'check' }, cbTotal, '接手后当天超过', numTotal, '节')),
+    el('p', { class: 'hint' }, '该班当天同一科目达到', numSubjectDay, '节时提示（只提示，不排除）。'),
+    el('div', { class: 'row mt10' }, saveMine, state.pref?.canEditSchool ? saveSchool : null),
+  );
+
+  for (const box of [cbSameClass, cbSameGrade, cbSameSubject, cbLightLoad, cbBusy, cbRun, cbTotal]) {
+    box.addEventListener('change', () => {
+      if (kind.value === 'REASSIGN') void loadCandidates();
+    });
+  }
+  for (const box of [numRun, numTotal, numSubjectDay]) {
+    box.addEventListener('change', () => {
+      if (kind.value === 'REASSIGN') void loadCandidates();
+    });
+  }
 
   function allTeachers() {
     return (state.refs?.teachers ?? []).filter((t) => t.id !== state.principal?.teacherId);
@@ -1214,18 +1327,35 @@ async function renderNewChange(panel, term, token) {
         candidates.length === 0 ? '' : '该教师不在候选评估范围内，请自行核对对方该节次是否有课。';
       return;
     }
-    candidateHint.textContent = `${TIER_LABEL[found.tier] ?? found.tier}：${found.reasons.join('；')}`;
+    const hints = (found.hints ?? []).length === 0 ? '' : `｜提示：${found.hints.join('；')}`;
+    candidateHint.textContent = `${TIER_LABEL[found.tier] ?? found.tier}：${found.reasons.join('；')}${hints}`;
+  }
+
+  function renderExcluded() {
+    if (excluded.length === 0) {
+      excludedHint.textContent = '';
+      return;
+    }
+    const shown = excluded.slice(0, 5).map((e) => `${e.teacherName ?? e.teacherId}（${e.reasons.join('；')}）`);
+    const rest = excluded.length - shown.length;
+    excludedHint.textContent = `按当前筛选，另有 ${excluded.length} 位教师未列出：${shown.join('、')}${rest > 0 ? ` 等 ${excluded.length} 位` : ''}。取消勾选即可重新看到。`;
   }
 
   async function loadCandidates() {
     const occurrenceId = occurrenceSelect.value;
     if (!occurrenceId) return;
-    const r = await api(
-      `/api/changes/candidates?termId=${encodeURIComponent(term.id)}&occurrenceId=${encodeURIComponent(occurrenceId)}`,
-    );
+    // 预览：把界面上当前的筛选条件交给服务端算一遍，不落库。
+    const payload = { termId: term.id, occurrenceId, preference: readPref() };
+    if (kind.value === 'MOVE') {
+      payload.toDate = dateField.value;
+      payload.toPeriod = Number(periodField.value);
+    }
+    const r = await api('/api/changes/candidates/preview', { method: 'POST', body: payload });
     if (token !== state.renderToken) return;
     candidates = r.data.ok ? (r.data.candidates ?? []) : [];
+    excluded = r.data.ok ? (r.data.excluded ?? []) : [];
     fillTeacherSelect();
+    renderExcluded();
     if (!r.data.ok) {
       candidateHint.textContent = `候选推荐不可用（${r.data.code ?? r.status}），下列为全部教师，请自行核对。`;
       return;
@@ -1247,6 +1377,7 @@ async function renderNewChange(panel, term, token) {
     el('span', {}, '改派给'),
     teacherSelect,
     candidateHint,
+    excludedHint,
   );
   const targetMove = el(
     'div',
@@ -1312,6 +1443,7 @@ async function renderNewChange(panel, term, token) {
     el('p', { class: 'hint' }, '提交后进入"待确认"，必须由受影响的教师本人逐人确认，系统不会自动视为同意。'),
     el('label', { class: 'field' }, el('span', {}, '课次'), occurrenceSelect),
     el('label', { class: 'field' }, el('span', {}, '变更方式'), kind),
+    filterBox,
     targetTeacher,
     targetMove,
     targetNone,

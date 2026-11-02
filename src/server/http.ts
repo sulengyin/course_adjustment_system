@@ -16,6 +16,13 @@ import type { Principal } from '../auth/principal.js';
 import { can } from '../auth/policy.js';
 import type { ChangeService } from '../service/change-service.js';
 import { CandidateService } from '../service/candidate-service.js';
+import {
+  ChangePreferenceService,
+  inputToPreference,
+  parsePreferenceInput,
+  recordToPreference,
+} from '../service/change-preference-service.js';
+import type { PreferenceRecord } from '../store/database.js';
 import type { TimetableService } from '../service/timetable-service.js';
 import type { EmergencyService, EmergencySummary } from '../service/emergency-service.js';
 import { StatusService } from '../service/status-service.js';
@@ -31,6 +38,7 @@ export interface AppDeps {
   readonly emergency: EmergencyService;
   readonly status?: StatusService;
   readonly candidates?: CandidateService;
+  readonly preferences?: ChangePreferenceService;
   readonly logger?: Logger;
   readonly now?: () => string;
 }
@@ -164,6 +172,7 @@ export type RequestListener = (req: IncomingMessage, res: ServerResponse) => voi
 export function createHandler(deps: AppDeps): RequestListener {
   const status = deps.status ?? new StatusService(deps.db, deps.now);
   const candidates = deps.candidates ?? new CandidateService(deps.db);
+  const preferences = deps.preferences ?? new ChangePreferenceService(deps.db, deps.now ? { now: deps.now } : {});
   return (req, res) => {
     const startedAt = Date.now();
     if (deps.logger) {
@@ -351,7 +360,16 @@ export function createHandler(deps: AppDeps): RequestListener {
       const termId = url.searchParams.get('termId');
       const occurrenceId = url.searchParams.get('occurrenceId');
       if (!termId || !occurrenceId) return fail(res, 400, 'BAD_INPUT');
-      const suggestion = candidates.suggest(termId, occurrenceId, principal);
+      // 换时间的方案必须按目标时段评估，否则推荐的是错的时段
+      const rawPeriod = url.searchParams.get('toPeriod');
+      const toPeriod = rawPeriod === null ? null : Number(rawPeriod);
+      if (rawPeriod !== null && (!Number.isInteger(toPeriod) || (toPeriod as number) < 1)) {
+        return fail(res, 400, 'BAD_INPUT');
+      }
+      const suggestion = candidates.suggest(termId, occurrenceId, principal, {
+        toDate: url.searchParams.get('toDate'),
+        toPeriod,
+      });
       const code = suggestion.code;
       const httpStatus =
         code === 'FOUND'
@@ -362,6 +380,73 @@ export function createHandler(deps: AppDeps): RequestListener {
               ? 409
               : 403;
       send(res, httpStatus, suggestion as unknown as Json);
+      return;
+    }
+
+    /**
+     * 候选预览：把界面上临时改过的筛选条件直接算一遍，不落库。
+     * 之所以用 POST：筛选条件是一个对象，塞进查询串既长又容易被截断。
+     */
+    if (path === '/api/changes/candidates/preview' && method === 'POST') {
+      const body = await readJson(req);
+      if (!body) return fail(res, 400, 'BAD_INPUT');
+      const termId = typeof body.termId === 'string' ? body.termId : '';
+      const occurrenceId = typeof body.occurrenceId === 'string' ? body.occurrenceId : '';
+      if (termId === '' || occurrenceId === '') return fail(res, 400, 'BAD_INPUT');
+      const input = parsePreferenceInput(body.preference);
+      if (input === null) return fail(res, 400, 'BAD_INPUT');
+      const toDate = typeof body.toDate === 'string' ? body.toDate : null;
+      const rawPeriod = body.toPeriod;
+      if (rawPeriod !== undefined && rawPeriod !== null && !Number.isInteger(rawPeriod)) {
+        return fail(res, 400, 'BAD_INPUT');
+      }
+      const suggestion = candidates.suggest(termId, occurrenceId, principal, {
+        toDate,
+        toPeriod: typeof rawPeriod === 'number' ? rawPeriod : null,
+        preference: inputToPreference(input),
+      });
+      send(res, suggestion.ok ? 200 : 404, suggestion as unknown as Json);
+      return;
+    }
+
+    /**
+     * 调课候选筛选偏好：读自己生效的那套（个人覆盖 > 全校默认 > 中性默认），
+     * 并同时给出全校默认，便于界面说明"当前用的是谁的口径"。
+     */
+    if (path === '/api/preferences/change' && method === 'GET') {
+      const effective = preferences.effective(principal.teacherId);
+      send(res, 200, {
+        ok: true,
+        source: effective.source,
+        preference: toPreferenceJson(effective.preference),
+        school: effective.school === null ? null : toRecordJson(effective.school),
+        mine: effective.mine === null ? null : toRecordJson(effective.mine),
+        canEditSchool: can(principal, 'CHANGE_L1_CONFIG').allowed,
+      });
+      return;
+    }
+
+    // 教师改自己的偏好：身份即授权，不需要角色；无教师身份者没有"自己的偏好"可改。
+    if (path === '/api/preferences/change' && method === 'PUT') {
+      if (!principal.teacherId) return fail(res, 403, 'NOT_A_TEACHER');
+      const body = await readJson(req);
+      if (!body) return fail(res, 400, 'BAD_INPUT');
+      const input = parsePreferenceInput(body);
+      if (input === null) return fail(res, 400, 'BAD_INPUT');
+      const saved = preferences.saveTeacher(principal.teacherId, input);
+      send(res, 200, { ok: true, saved: toRecordJson(saved) });
+      return;
+    }
+
+    // 全校默认属 L1 参数：只有课务管理人员可改（CHANGE_L1_CONFIG），管理员也不代管。
+    if (path === '/api/preferences/change/school' && method === 'PUT') {
+      if (!can(principal, 'CHANGE_L1_CONFIG').allowed) return fail(res, 403, 'FORBIDDEN');
+      const body = await readJson(req);
+      if (!body) return fail(res, 400, 'BAD_INPUT');
+      const input = parsePreferenceInput(body);
+      if (input === null) return fail(res, 400, 'BAD_INPUT');
+      const saved = preferences.saveSchool(input, principal.userId);
+      send(res, 200, { ok: true, saved: toRecordJson(saved) });
       return;
     }
 
@@ -537,6 +622,35 @@ function emergencyStatus(result: EmergencySummary): number {
 
 export function createApp(deps: AppDeps): Server {
   return createServer(createHandler(deps));
+}
+
+/** 偏好按嵌套结构返回：界面按 consider/exclude/hint 分组展示，避免自己再拼字段。 */
+function toPreferenceJson(p: ReturnType<typeof recordToPreference>): Json {
+  return {
+    consider: { ...p.consider },
+    exclude: { ...p.exclude },
+    hint: { ...p.hint },
+  };
+}
+
+function toRecordJson(r: PreferenceRecord): Json {
+  return {
+    scope: r.scope,
+    teacherId: r.teacherId,
+    considerSameClass: r.considerSameClass,
+    considerSameGrade: r.considerSameGrade,
+    considerSameSubject: r.considerSameSubject,
+    considerLightLoad: r.considerLightLoad,
+    excludeBusyAtSlot: r.excludeBusyAtSlot,
+    excludeConsecutive: r.excludeConsecutive,
+    consecutiveLimit: r.consecutiveLimit,
+    excludeDayTotal: r.excludeDayTotal,
+    dayTotalLimit: r.dayTotalLimit,
+    hintClassSubjectDay: r.hintClassSubjectDay,
+    classSubjectDayLimit: r.classSubjectDayLimit,
+    updatedAt: r.updatedAt,
+    updatedBy: r.updatedBy,
+  };
 }
 
 function publicPrincipal(p: Principal): Json {

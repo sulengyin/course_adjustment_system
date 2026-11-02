@@ -137,3 +137,13 @@ P7H-4,调课,推荐不强制：推荐之外的教师仍然可选,docs/13 §2,P7H
 P7H-5,调课,候选名单只给该课次的现任授课教师,docs/13 §5,P7H,,tests/server/http.spec.ts,verified
 P7H-6,调课,推荐不写库、不进入确认集合计算,docs/13 §2,P7H,,src/service/candidate-service.ts,verified
 P7H-7,调课,推荐理由只写本学期现任教关系，不写历史教过,docs/13 §3,P7H,,tests/domain/candidate.spec.ts,verified
+P7I-1,调课,筛选维度由学校设默认、教师可覆盖，系统不写死,docs/13 §7,P7I,,tests/service/change-preference.spec.ts,verified
+P7I-2,调课,默认不隐藏任何教师，只排序（中性默认）,docs/13 §7.2,P7I,,tests/domain/candidate.spec.ts,verified
+P7I-3,调课,排除：该节次有课 / 连堂≥N / 当天>N，可勾选,docs/13 §7.1,P7I,,tests/domain/candidate.spec.ts,verified
+P7I-4,调课,连堂只看教师本人连堂，默认阈值 3 节,docs/13 §7.1,P7I,,src/domain/candidate.ts,verified
+P7I-5,调课,该班当天同一科目只提示不排除,docs/13 §7.1,P7I,,tests/domain/candidate.spec.ts,verified
+P7I-6,调课,跨学科按低固定值计分，不随调课方式浮动,docs/13 §3.1,P7I,,src/domain/candidate.ts,verified
+P7I-7,调课,被排除的教师必须连同原因返回，不得悄悄消失,docs/13 §7.4,P7I,,tests/server/http.spec.ts,verified
+P7I-8,调课,全校默认属 L1 参数：课务管理人员可改，管理员不代管,docs/13 §7.3,P7I,,tests/server/http.spec.ts,verified
+P7I-9,调课,偏好不写审计链，且不影响确认集合与冲突判定,docs/13 §7.3,P7I,,src/service/change-preference-service.ts,verified
+P7I-10,调课,换时间的方案按目标时段评估，不按原时段,docs/13 §7.1,P7I,,tests/service/candidate.spec.ts,verified
