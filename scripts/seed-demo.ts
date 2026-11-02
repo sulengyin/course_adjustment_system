@@ -7,7 +7,7 @@
  *  3. 账号一律 must_change_password=1，首次登录必须改密——演示也不例外。
  */
 
-import { CourseDatabase } from '../src/store/database.js';
+import { CourseDatabase, MODE_LABEL } from '../src/store/database.js';
 import { DEFECTS, DEMO_SNAPSHOT } from '../src/store/fixtures.js';
 import { TimetableService } from '../src/service/timetable-service.js';
 import { AuthService } from '../src/auth/service.js';
@@ -29,6 +29,19 @@ function main(): void {
 
   const db = new CourseDatabase(dbPath);
   try {
+    // 环境闸门必须在"库是否为空"之前：一个空的正式库同样不许灌虚构数据。
+    const mode = db.deploymentMode();
+    if (mode === null) {
+      db.setDeploymentMode('DEMO');
+      console.log('本库尚未设定环境，已标记为演示 / 联调环境（DEMO）：此后不得导入真实名单与真实课表。');
+    } else if (mode !== 'DEMO') {
+      console.error(
+        `拒绝执行：当前库是${MODE_LABEL[mode]}（${mode}），不能载入虚构演示数据。` +
+          '演示请另建一个库。',
+      );
+      process.exit(3);
+    }
+
     const existingTerms = db.listTerms().length;
     const existingUsers = db.countAccounts();
     if (existingTerms > 0 || existingUsers > 0) {

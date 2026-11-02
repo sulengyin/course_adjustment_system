@@ -211,6 +211,12 @@ export function createHandler(deps: AppDeps): RequestListener {
       return;
     }
 
+    // 环境标识不做鉴权：它要在登录页之前就能显示，且本身不含业务数据。
+    if (path === '/api/env' && method === 'GET') {
+      send(res, 200, { ok: true, deploymentMode: deps.db.deploymentMode() });
+      return;
+    }
+
     if (path === '/api/healthz' && method === 'GET') {
       const chain = deps.db.auditLog.verify();
       send(res, chain.ok ? 200 : 503, {

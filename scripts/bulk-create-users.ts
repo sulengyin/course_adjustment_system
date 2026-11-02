@@ -94,6 +94,9 @@ function main(): void {
       return;
     }
 
+    // 花名册是真实人员信息，不得在演示库里建这些账号
+    db.requireMode('PRODUCTION');
+
     const result = new BulkUserService(db, auth).import(login.principal, rows);
 
     if (result.rejected.length > 0) {

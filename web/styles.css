@@ -33,6 +33,18 @@ html, body {
 
 .boot { padding: 48px; text-align: center; color: var(--muted); }
 
+/* ---------- 环境横幅 ---------- */
+.env-banner {
+  padding: 6px 16px;
+  text-align: center;
+  font-size: 13px;
+  font-weight: 600;
+  border-bottom: 1px solid var(--line-strong);
+}
+.env-banner.demo { background: var(--warn-weak); color: var(--warn); }
+.env-banner.production { background: var(--brand-weak); color: var(--brand); }
+.env-banner[hidden] { display: none; }
+
 .app { min-height: 100vh; display: flex; flex-direction: column; }
 
 /* ---------- 顶部 ---------- */

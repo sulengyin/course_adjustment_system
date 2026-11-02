@@ -124,6 +124,10 @@ function createHarness(routes: Record<string, unknown>, token: string | null): H
   const toast = new Node('div');
   toast.setAttribute('id', 'toast');
   registry.set('toast', toast as unknown as FakeNode);
+  const envBanner = new Node('div');
+  envBanner.setAttribute('id', 'env-banner');
+  envBanner.hidden = true;
+  registry.set('env-banner', envBanner as unknown as FakeNode);
 
   const document = {
     getElementById: (id: string): FakeNode | null => registry.get(id) ?? null,
@@ -311,7 +315,36 @@ describe('页面渲染（最小 DOM）', () => {
     const text = textOf(app);
     expect(text).toContain('校内课务协同系统');
     expect(text).toContain('登录');
-    expect(harness.requests).toEqual([]);
+    // /api/env 只是环境标识，不含任何业务数据，未登录时取它不算请求业务接口
+    expect(harness.requests).toEqual(['/api/env']);
+  });
+
+  it('演示环境横幅在登录前就常驻显示，标明库内全是虚构数据', async () => {
+    const harness = createHarness({ '/api/env': { ok: true, deploymentMode: 'DEMO' } }, null);
+    await harness.flush();
+    const banner = harness.document.getElementById('env-banner') as FakeNode;
+    expect(banner.hidden).toBe(false);
+    expect(banner.textContent).toContain('演示');
+    expect(banner.textContent).toContain('虚构数据');
+  });
+
+  it('正式环境横幅标明是真实业务数据', async () => {
+    const harness = createHarness({ '/api/env': { ok: true, deploymentMode: 'PRODUCTION' } }, null);
+    await harness.flush();
+    const banner = harness.document.getElementById('env-banner') as FakeNode;
+    expect(banner.hidden).toBe(false);
+    expect(banner.textContent).toContain('正式业务环境');
+    expect(banner.textContent).toContain('真实业务数据');
+    // 演示横幅才有"库内全部为虚构数据"这句话，两种环境的说法不能串
+    expect(banner.textContent).not.toContain('库内全部为虚构数据');
+  });
+
+  it('拿不到环境标识时横幅保持隐藏，不猜一种环境', async () => {
+    const harness = createHarness({}, null);
+    await harness.flush();
+    const banner = harness.document.getElementById('env-banner') as FakeNode;
+    expect(banner.hidden).toBe(true);
+    expect(banner.textContent).toBe('');
   });
 
   it('登录接口返回 401 时按凭据错误提示，不误报"登录已失效"', async () => {

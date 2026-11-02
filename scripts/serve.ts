@@ -57,6 +57,16 @@ async function main(): Promise<void> {
   }
 
   const db = new CourseDatabase(dbPath);
+  // 环境未定的库不许启动：否则界面上无法标明这是演示还是正式，用户会把演示数据当真。
+  const mode = db.deploymentMode();
+  if (mode === null) {
+    console.error(
+      '该库尚未设定环境，拒绝启动。请先执行：CA_DB_PATH=<库> CA_MODE=demo|production npm run set-mode',
+    );
+    db.close();
+    process.exit(3);
+  }
+
   const chain = db.auditLog.verify();
   if (!chain.ok) {
     console.error(`审计链校验失败（brokenAt=${chain.brokenAt}, ${chain.reason}），拒绝启动`);
@@ -90,6 +100,11 @@ async function main(): Promise<void> {
 
   console.log(
     `已启动：${started.tls ? 'https' : 'http'}://${started.address}:${started.port}　数据库=${dbPath}　审计条数=${chain.length}`,
+  );
+  console.log(
+    mode === 'DEMO'
+      ? '环境：演示 / 联调（DEMO）—— 库内全部为虚构数据，不得导入真实名单与真实课表。'
+      : '环境：正式业务（PRODUCTION）—— 库内为真实业务数据，不得载入虚构演示数据。',
   );
   if (!started.tls) {
     console.warn('警告：当前为明文 HTTP。纯内网环境下口令与课表将以明文传输，需由校方书面确认该风险。');

@@ -102,6 +102,9 @@ function main(): void {
       return;
     }
 
+    // 真实名单不得进入演示库：那里的数据会被当成可以随便试的东西
+    db.requireMode('PRODUCTION');
+
     const result = new TeacherRosterService(db, auth).import(login.principal, rows, {
       fileName: basename(csvPath),
       sha256,

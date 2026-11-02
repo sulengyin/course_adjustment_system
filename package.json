@@ -21,7 +21,8 @@
     "seed:demo": "tsx scripts/seed-demo.ts",
     "smoke:ui": "tsx scripts/smoke-ui.ts",
     "bulk-users": "tsx scripts/bulk-create-users.ts",
-    "import-teachers": "tsx scripts/import-teachers.ts"
+    "import-teachers": "tsx scripts/import-teachers.ts",
+    "set-mode": "tsx scripts/set-mode.ts"
   },
   "devDependencies": {
     "@types/node": "^26.6.6",

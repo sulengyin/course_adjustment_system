@@ -98,3 +98,9 @@ P7B-6,名单,真实名单只标记为 IMPORTED_UNVERIFIED，不可升级为 OFFI
 P7B-7,名单,姓名唯一：重名会让课表按姓名匹配时无法区分,docs/04 §4 / docs/06 §4,P7B,,tests/service/teacher-roster.spec.ts,verified
 P7B-8,名单,自动生成的编号避开库中与本批已占用，并留待迁移的审计提示,docs/06 §3,P7B,,tests/service/teacher-roster.spec.ts,verified
 P7B-9,权限,导入名单归课务管理人员，管理员不得代管业务基础资料,permission-matrix,P7B,,tests/service/teacher-roster.spec.ts,verified
+P7C-1,环境,库一经建立即固定为 DEMO 或 PRODUCTION，不可更改,docs/07 §2,P7C,,scripts/set-mode.ts,verified
+P7C-2,环境,正式库拒绝载入虚构演示数据,docs/07 §3,P7C,,scripts/seed-demo.ts,verified
+P7C-3,环境,演示库拒绝导入真实名单与真实花名册,docs/07 §3,P7C,,scripts/import-teachers.ts,verified
+P7C-4,环境,环境未设定的库拒绝启动服务,docs/07 §3,P7C,,scripts/serve.ts,verified
+P7C-5,环境,登录前即常驻显示环境横幅，不猜、不默认,docs/07 §5,P7C,,tests/ui/render.spec.ts,verified
+P7C-6,环境,备份 manifest 记录环境，恢复时可辨认来源库,docs/07 §5,P7C,,src/backup/service.ts,verified

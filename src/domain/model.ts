@@ -5,6 +5,18 @@
 
 export type DataOrigin = 'SIMULATED' | 'IMPORTED_UNVERIFIED' | 'OFFICIAL';
 
+/**
+ * 部署环境：区分"演示/联调库"与"正式业务库"。
+ *
+ * 这个区分不做成开关，而是库一旦建立就固定的属性：
+ *  - DEMO 库只装虚构数据（SIMULATED），不得导入真实名单、真实课表；
+ *  - PRODUCTION 库只装真实业务数据，不得载入虚构种子数据。
+ *
+ * 混装的代价是不对称的：真实教师名单一旦进了演示库，就会被当成"可随便试的数据"，
+ * 而虚构课表一旦混进正式库，会让人分不清哪条是真课表。所以宁可拒绝，不要混装。
+ */
+export type DeploymentMode = 'DEMO' | 'PRODUCTION';
+
 export type Certainty = 'KNOWN' | 'UNKNOWN';
 
 /** 单双周口径。'ALL' 表示每周都上。 */

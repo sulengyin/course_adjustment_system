@@ -37,10 +37,16 @@ const EMERGENCY_ACTIONS = [
   ['overdue', '逾期判定'],
 ];
 
+const ENV_TEXT = {
+  DEMO: '演示 / 联调环境　库内全部为虚构数据　不得导入真实名单与真实课表',
+  PRODUCTION: '正式业务环境　库内为真实业务数据　不得载入虚构演示数据',
+};
+
 const state = {
   token: '',
   principal: null,
   meta: null,
+  envMode: null,
   section: 'timetable',
   termId: null,
   weekStart: null,
@@ -54,7 +60,32 @@ const state = {
 
 const app = document.getElementById('app');
 const toastBox = document.getElementById('toast');
+const envBanner = document.getElementById('env-banner');
 let toastTimer = 0;
+
+/**
+ * 环境横幅在登录前就要显示：等到登录后才提示，用户已经把演示数据看过一轮了。
+ * 拿不到就保持隐藏——不猜，也不写死一种环境。
+ */
+async function loadEnv() {
+  try {
+    const res = await fetch('/api/env');
+    if (!res.ok) return;
+    const body = await res.json();
+    state.envMode = typeof body.deploymentMode === 'string' ? body.deploymentMode : null;
+  } catch {
+    state.envMode = null;
+  }
+  if (!envBanner) return;
+  const text = ENV_TEXT[state.envMode];
+  if (!text) {
+    envBanner.hidden = true;
+    return;
+  }
+  envBanner.textContent = text;
+  envBanner.className = `env-banner ${state.envMode === 'DEMO' ? 'demo' : 'production'}`;
+  envBanner.hidden = false;
+}
 
 /* ------------------------------------------------------------------ 基础工具 */
 
@@ -221,6 +252,7 @@ async function api(path, options = {}) {
 /* ------------------------------------------------------------------ 启动 */
 
 async function boot() {
+  await loadEnv();
   saveToken(loadToken());
   if (!state.token) return renderLogin();
   try {

@@ -7,6 +7,7 @@
  *  - 数据来源分项统计，避免把模拟数据与正式数据混成一个总数。
  */
 
+import type { DeploymentMode } from '../domain/model.js';
 import type { Principal } from '../auth/principal.js';
 import { ALL_ACTIONS, ACTION_LABEL, can } from '../auth/policy.js';
 import type { ChangeStore } from '../store/change-store.js';
@@ -25,6 +26,8 @@ export interface MetaView {
   readonly ok: true;
   readonly serverTime: string;
   readonly schemaVersion: string | null;
+  /** 库的环境；null 表示尚未设定（此时服务应拒绝启动，界面不会走到这里） */
+  readonly deploymentMode: DeploymentMode | null;
   readonly terms: ReadonlyArray<{
     readonly id: string;
     readonly label: string;
@@ -79,6 +82,7 @@ export class StatusService {
       ok: true,
       serverTime: this.now(),
       schemaVersion: this.db.getMeta('schema_version'),
+      deploymentMode: this.db.deploymentMode(),
       terms: this.db.listTerms().map((t) => ({
         id: t.id,
         label: t.label,

@@ -12,6 +12,7 @@
 import { createHash } from 'node:crypto';
 import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import type { DeploymentMode } from '../domain/model.js';
 import type { CourseDatabase } from '../store/database.js';
 import { CourseDatabase as Database } from '../store/database.js';
 import { type Tally, TALLY_KEYS, diffTally, tally, type TallyDiff } from './reconcile.js';
@@ -19,6 +20,8 @@ export interface BackupManifest {
   readonly formatVersion: 2;
   readonly createdAt: string;
   readonly schemaVersion: string;
+  /** 备份来源库的环境；恢复对账时据此判断"这份备份属于哪类库" */
+  readonly deploymentMode: DeploymentMode | null;
   readonly dbFile: string;
   readonly sha256: string;
   readonly bytes: number;
@@ -78,9 +81,12 @@ export function createBackup(db: CourseDatabase, dir: string, createdAt: string)
   const copy = new Database(dbPath);
   let copyTally: Tally;
   let schemaVersion: string;
+  let deploymentMode: DeploymentMode | null;
   try {
     copyTally = tally(copy);
     schemaVersion = String(copy.getMeta('schema_version') ?? 'unknown');
+    // 备份必须带上环境：把演示备份恢复成正式库，后果与备份损坏同级
+    deploymentMode = copy.deploymentMode();
   } finally {
     copy.close();
   }
@@ -89,6 +95,7 @@ export function createBackup(db: CourseDatabase, dir: string, createdAt: string)
     formatVersion: 2,
     createdAt,
     schemaVersion,
+    deploymentMode,
     dbFile,
     sha256: sha256File(dbPath),
     bytes: statSync(dbPath).size,

@@ -5,6 +5,7 @@ import type {
   BellEntry,
   CalendarException,
   DataOrigin,
+  DeploymentMode,
   ExceptionKind,
   Occurrence,
   SchoolSnapshot,
@@ -12,6 +13,12 @@ import type {
   Weekday,
   WeekParity,
 } from '../domain/model.js';
+
+/** 环境名称：错误消息与界面都用它，避免各处各写一套说法。 */
+export const MODE_LABEL: Readonly<Record<DeploymentMode, string>> = Object.freeze({
+  DEMO: '演示 / 联调环境',
+  PRODUCTION: '正式业务环境',
+});
 
 /**
  * P2 存储层：SQLite（node:sqlite 内置模块，无原生依赖）。
@@ -447,6 +454,38 @@ export class CourseDatabase {
   getMeta(key: string): string | null {
     const row = this.db.prepare('SELECT value FROM meta WHERE key = ?').get(key) as { value: string } | undefined;
     return row?.value ?? null;
+  }
+
+  /** 库的环境；null = 尚未设定，此时任何读写真实业务的入口都应先拒绝。 */
+  deploymentMode(): DeploymentMode | null {
+    const v = this.getMeta('deployment_mode');
+    return v === 'DEMO' || v === 'PRODUCTION' ? v : null;
+  }
+
+  /**
+   * 首次设定环境。已设定则抛错——环境不是可以随时切换的开关，
+   * 切换意味着此前的数据归属要重新解释，只能另建库。
+   */
+  setDeploymentMode(mode: DeploymentMode): void {
+    const current = this.deploymentMode();
+    if (current !== null) {
+      throw new Error(`该库已设定为 ${MODE_LABEL[current]}（${current}），不可更改；需要另一种环境请新建库。`);
+    }
+    this.db.prepare('INSERT INTO meta(key, value) VALUES(?, ?)').run('deployment_mode', mode);
+  }
+
+  /** 入口闸门：环境不符就抛错，把"虚构数据进正式库 / 真实数据进演示库"挡在写入之前。 */
+  requireMode(expected: DeploymentMode): void {
+    const actual = this.deploymentMode();
+    if (actual === null) {
+      throw new Error(`该库尚未设定环境，请先执行：npm run set-mode（当前需要 ${MODE_LABEL[expected]}）`);
+    }
+    if (actual !== expected) {
+      throw new Error(
+        `此操作只允许在${MODE_LABEL[expected]}库执行，当前库是${MODE_LABEL[actual]}（${actual}）。` +
+          '两种环境的数据不得混装，请换用对应的库。',
+      );
+    }
   }
 
   /** 单事务执行；失败整体回滚，不部分生效。 */
