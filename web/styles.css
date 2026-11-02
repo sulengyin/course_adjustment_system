@@ -184,8 +184,66 @@ input, select, textarea {
   min-width: 0;
 }
 textarea { width: 100%; min-height: 76px; resize: vertical; }
-label.field { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--muted); }
-label.field > span { font-weight: 600; color: var(--text); }
+.field { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--muted); }
+.field > span { font-weight: 600; color: var(--text); }
+
+/* ---------- 改派对象：页面内可滚动名单 ---------- */
+/* 不用原生 select 弹层：上百位候选时，部分浏览器（平板/手机）点击弹层滚动条会整层关闭。 */
+.picker-trigger { width: 100%; max-width: 520px; text-align: left; }
+.picker-trigger.primary { max-width: 520px; }
+.picker {
+  width: 100%;
+  max-width: 520px;
+  margin-top: 6px;
+  padding: 8px;
+  background: #fff;
+  border: 1px solid var(--line-strong);
+  border-radius: 10px;
+  box-shadow: var(--shadow);
+}
+.picker-search { flex: 1; min-width: 120px; }
+.picker-list {
+  margin-top: 8px;
+  min-height: 140px;
+  max-height: 46vh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+}
+.picker-group {
+  position: sticky;
+  top: 0;
+  padding: 6px 8px;
+  background: #fafbfc;
+  border-bottom: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+.picker-row {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  flex-wrap: wrap;
+  width: 100%;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.picker-row:hover { background: var(--brand-weak); }
+.picker-row.is-selected { background: var(--brand-weak); box-shadow: inset 0 0 0 1px var(--brand); }
+.picker-row .picker-name { font-weight: 600; color: var(--text); }
+.picker-row .picker-tag { font-size: 12px; color: var(--brand); }
+.picker-row .picker-meta { font-size: 12px; color: var(--muted); }
+.picker-empty { margin: 0; padding: 14px 10px; color: var(--muted); font-size: 13px; }
 
 /* ---------- 登录 ---------- */
 .login-wrap { flex: 1; display: grid; place-items: center; padding: 40px 20px; }

@@ -241,6 +241,14 @@ function findTag(root: FakeNode, tag: string): FakeNode | null {
   return found;
 }
 
+function findByClass(root: FakeNode, className: string): FakeNode | null {
+  let found: FakeNode | null = null;
+  walk(root, (n) => {
+    if (!found && n.className.split(' ').includes(className)) found = n;
+  });
+  return found;
+}
+
 function findByText(root: FakeNode, label: string): FakeNode | null {
   let found: FakeNode | null = null;
   walk(root, (n) => {
@@ -479,6 +487,68 @@ describe('页面渲染（最小 DOM）', () => {
     const text = textOf(app);
     expect(text).toContain('新建方案');
     expect(text).toContain('待我确认');
+  });
+
+  it('改派对象是页面内可滚动名单，不依赖浏览器原生下拉弹层', async () => {
+    const harness = createHarness(
+      {
+        '/api/me': { ok: true, principal: PRINCIPAL },
+        '/api/meta': META,
+        '/api/timetable/me': VIEW,
+        '/api/changes/mine': { ok: true, submitted: [], awaiting: [] },
+        '/api/refs': { ok: true, teachers: [{ id: 'T02', name: '示例教师乙' }], classes: [], subjects: [] },
+        '/api/changes/candidates/preview': {
+          ok: true,
+          candidates: [
+            {
+              teacherId: 'T02',
+              teacherName: '示例教师乙',
+              tier: 'SAME_CLASS',
+              freeAtSlot: true,
+              teachesSubject: true,
+              reasons: ['本学期任教同一科目'],
+              hints: [],
+            },
+          ],
+          excluded: [],
+        },
+        '/api/changes': { ok: true, caseId: 'CASE-1', status: 'PENDING', required: [] },
+      },
+      'token-1',
+    );
+    await harness.flush();
+    const app = harness.document.getElementById('app') as FakeNode;
+    findByText(app, '调课')?.dispatch('click');
+    await harness.flush();
+    findByText(app, '新建方案')?.dispatch('click');
+    await harness.flush();
+
+    const trigger = findByText(app, '选择教师…');
+    expect(trigger).not.toBeNull();
+    trigger?.dispatch('click');
+    await harness.flush();
+
+    const list = findByClass(app, 'picker-list');
+    expect(list).not.toBeNull();
+    expect(textOf(list as FakeNode)).toContain('示例教师乙');
+    // 名单里不能有原生 select：它的弹层在点滚动条时会被浏览器整层关掉
+    expect(findAllTag(list as FakeNode, 'select').length).toBe(0);
+
+    // 还没选人就提交：不发起请求，只如实提示
+    const form = findAllTag(app, 'form').find((f) => textOf(f).includes('新建调课方案'));
+    form?.dispatch('submit');
+    await harness.flush();
+    expect(harness.requests).not.toContain('/api/changes');
+    expect(textOf(app)).toContain('请先选择要改派给的教师');
+
+    const row = findAllTag(list as FakeNode, 'button')[0];
+    row?.dispatch('click');
+    await harness.flush();
+    expect(textOf(app)).toContain('已选：示例教师乙');
+
+    form?.dispatch('submit');
+    await harness.flush();
+    expect(harness.requests).toContain('/api/changes');
   });
 
   it('管理员可见系统状态入口，教师不可见', async () => {

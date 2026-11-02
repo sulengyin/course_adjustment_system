@@ -1169,13 +1169,28 @@ async function renderNewChange(panel, term, token) {
   /**
    * 改派对象：默认给"按规则排过序的候选"，而不是全校名单。
    * 推荐不锁死选择——推荐之外仍然可选，界面会说明为什么要自行核对。
+   *
+   * 不用原生 select：候选上百人时，原生弹层在部分浏览器（尤其平板/手机）
+   * 点击滚动条会把整层关掉，导致根本选不了人。改成页面内的可滚动名单：
+   * 滚动条是真实 DOM 滚动，另加姓名过滤，不依赖浏览器弹层。
    */
   const TIER_LABEL = { SAME_CLASS: '任教该班', SAME_GRADE: '任教同年级', CROSS_GRADE: '跨年级' };
-  const teacherSelect = el('select', {});
   const candidateHint = el('p', { class: 'hint' });
   const excludedHint = el('p', { class: 'hint' });
   let candidates = [];
   let excluded = [];
+  let selectedTeacherId = '';
+
+  const teacherSearch = el('input', { type: 'search', class: 'picker-search', placeholder: '输入姓名过滤' });
+  const teacherList = el('div', { class: 'picker-list' });
+  const teacherTrigger = el('button', { type: 'button', class: 'btn picker-trigger' }, '选择教师…');
+  const closePicker = el('button', { type: 'button', class: 'btn ghost' }, '收起');
+  const teacherPanel = el(
+    'div',
+    { class: 'picker', hidden: true },
+    el('div', { class: 'row tight' }, teacherSearch, closePicker),
+    teacherList,
+  );
 
   /**
    * 筛选条件：默认取"我的偏好 > 全校默认 > 中性默认"（服务端已算好），
@@ -1287,44 +1302,106 @@ async function renderNewChange(panel, term, token) {
     return (state.refs?.teachers ?? []).filter((t) => t.id !== state.principal?.teacherId);
   }
 
-  function optionOf(candidate) {
-    const tags = candidate.reasons
-      .filter((r) => !r.startsWith('当天'))
-      .slice(0, 2)
-      .join(' · ');
-    const name = candidate.teacherName ?? candidate.teacherId;
-    return el('option', { value: candidate.teacherId }, tags === '' ? name : `${name}（${tags}）`);
+  function nameOf(candidate) {
+    return candidate?.teacherName ?? candidate?.teacherId ?? '';
   }
 
-  function fillTeacherSelect() {
-    clear(teacherSelect);
+  /** 分组只用于显示顺序，选择不受限：三组之外的人同样能选。 */
+  function grouped() {
     if (candidates.length === 0) {
-      for (const t of allTeachers()) teacherSelect.append(el('option', { value: t.id }, t.name));
-      return;
+      return [
+        {
+          label: '全部教师（候选推荐不可用，请自行核对对方该节次是否有课）',
+          rows: allTeachers().map((t) => ({ teacherId: t.id, teacherName: t.name, reasons: [] })),
+        },
+      ];
     }
     const recommended = candidates.filter((c) => c.freeAtSlot);
     const needSwap = candidates.filter((c) => !c.freeAtSlot && (c.teachesSubject || c.tier !== 'CROSS_GRADE'));
     const others = candidates.filter((c) => !c.freeAtSlot && !c.teachesSubject && c.tier === 'CROSS_GRADE');
-    if (recommended.length > 0) {
-      teacherSelect.append(
-        el('optgroup', { label: '推荐（该节次本人无课，按匹配度排序）' }, ...recommended.map(optionOf)),
-      );
+    return [
+      { label: `推荐（该节次本人无课，共 ${recommended.length} 位）`, rows: recommended },
+      { label: `该节次有课 · 需先与对方对调（共 ${needSwap.length} 位）`, rows: needSwap },
+      { label: `其他教师（共 ${others.length} 位）`, rows: others },
+    ].filter((g) => g.rows.length > 0);
+  }
+
+  function renderTeacherList() {
+    clear(teacherList);
+    const keyword = teacherSearch.value.trim();
+    let shown = 0;
+    for (const group of grouped()) {
+      const rows = keyword === '' ? group.rows : group.rows.filter((c) => nameOf(c).includes(keyword));
+      if (rows.length === 0) continue;
+      teacherList.append(el('div', { class: 'picker-group' }, group.label));
+      for (const c of rows) {
+        shown += 1;
+        const tags = (c.reasons ?? [])
+          .filter((r) => !r.startsWith('当天'))
+          .slice(0, 2)
+          .join(' · ');
+        const row = el(
+          'button',
+          {
+            type: 'button',
+            class: `picker-row${c.teacherId === selectedTeacherId ? ' is-selected' : ''}`,
+          },
+          el('span', { class: 'picker-name' }, nameOf(c)),
+          TIER_LABEL[c.tier] ? el('span', { class: 'picker-tag' }, TIER_LABEL[c.tier]) : null,
+          tags === '' ? null : el('span', { class: 'picker-meta' }, tags),
+        );
+        row.addEventListener('click', () => {
+          setTeacher(c.teacherId);
+          teacherPanel.hidden = true;
+        });
+        teacherList.append(row);
+      }
     }
-    if (needSwap.length > 0) {
-      teacherSelect.append(
-        el('optgroup', { label: '该节次有课 · 需先与对方对调' }, ...needSwap.map(optionOf)),
+    if (shown === 0) {
+      teacherList.append(
+        el(
+          'p',
+          { class: 'picker-empty' },
+          keyword === '' ? '没有可改派的教师。' : `没有匹配"${keyword}"的教师。清空过滤条件可看到全部。`,
+        ),
       );
-    }
-    if (others.length > 0) {
-      teacherSelect.append(el('optgroup', { label: '其他教师' }, ...others.map(optionOf)));
     }
   }
 
+  function setTeacher(id) {
+    selectedTeacherId = id ?? '';
+    const found = candidates.find((c) => c.teacherId === id);
+    const label = found ? nameOf(found) : (allTeachers().find((t) => t.id === id)?.name ?? '');
+    teacherTrigger.textContent = selectedTeacherId === '' ? '选择教师…' : `已选：${label || selectedTeacherId}`;
+    teacherTrigger.className = `btn picker-trigger${selectedTeacherId === '' ? '' : ' primary'}`;
+    syncHint();
+  }
+
+  function togglePicker() {
+    teacherPanel.hidden = !teacherPanel.hidden;
+    if (!teacherPanel.hidden) {
+      renderTeacherList();
+      teacherSearch.focus();
+    }
+  }
+
+  teacherTrigger.addEventListener('click', togglePicker);
+  closePicker.addEventListener('click', () => {
+    teacherPanel.hidden = true;
+  });
+  teacherSearch.addEventListener('input', renderTeacherList);
+  teacherSearch.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') teacherPanel.hidden = true;
+  });
+
   function syncHint() {
-    const found = candidates.find((c) => c.teacherId === teacherSelect.value);
+    const found = candidates.find((c) => c.teacherId === selectedTeacherId);
     if (!found) {
-      candidateHint.textContent =
-        candidates.length === 0 ? '' : '该教师不在候选评估范围内，请自行核对对方该节次是否有课。';
+      if (candidates.length === 0 || selectedTeacherId === '') {
+        candidateHint.textContent = '';
+        return;
+      }
+      candidateHint.textContent = '该教师不在候选评估范围内，请自行核对对方该节次是否有课。';
       return;
     }
     const hints = (found.hints ?? []).length === 0 ? '' : `｜提示：${found.hints.join('；')}`;
@@ -1354,7 +1431,8 @@ async function renderNewChange(panel, term, token) {
     if (token !== state.renderToken) return;
     candidates = r.data.ok ? (r.data.candidates ?? []) : [];
     excluded = r.data.ok ? (r.data.excluded ?? []) : [];
-    fillTeacherSelect();
+    // 名单开着就立即重画；关着时交给打开时渲染，避免无谓重排。
+    if (!teacherPanel.hidden) renderTeacherList();
     renderExcluded();
     if (!r.data.ok) {
       candidateHint.textContent = `候选推荐不可用（${r.data.code ?? r.status}），下列为全部教师，请自行核对。`;
@@ -1363,19 +1441,22 @@ async function renderNewChange(panel, term, token) {
     syncHint();
   }
 
-  teacherSelect.addEventListener('change', syncHint);
   occurrenceSelect.addEventListener('change', () => {
+    setTeacher('');
     if (kind.value === 'REASSIGN') void loadCandidates();
   });
 
   const dateField = el('input', { type: 'date', value: from });
   const periodField = el('input', { type: 'number', min: '1', max: '20', value: '1' });
 
+  // 不用 label 包控件：label 会把点击转发给内部第一个可关联控件，
+  // 点在面板上也会被当成点触发器，面板会被自己关掉。
   const targetTeacher = el(
-    'label',
+    'div',
     { class: 'field' },
     el('span', {}, '改派给'),
-    teacherSelect,
+    teacherTrigger,
+    teacherPanel,
     candidateHint,
     excludedHint,
   );
@@ -1416,13 +1497,19 @@ async function renderNewChange(panel, term, token) {
       onsubmit: async (event) => {
         event.preventDefault();
         const occurrenceId = occurrenceSelect.value;
+        // 除"调整时间""停课"外都要指定教师；没选就提交只会在服务端才报错，不如在界面上先说清楚。
+        if (kind.value !== 'MOVE' && kind.value !== 'CANCEL' && selectedTeacherId === '') {
+          clear(result);
+          result.append(notice('请先选择要改派给的教师。', 'warn'));
+          return;
+        }
         const payload = {
           termId: term.id,
           items: [
             {
               occurrenceId,
               kind: kind.value,
-              toTeacherId: kind.value === 'REASSIGN' ? teacherSelect.value : null,
+              toTeacherId: kind.value === 'REASSIGN' ? selectedTeacherId : null,
               toDate: kind.value === 'MOVE' ? dateField.value : null,
               toPeriod: kind.value === 'MOVE' ? Number(periodField.value) : null,
             },
@@ -1453,7 +1540,7 @@ async function renderNewChange(panel, term, token) {
   );
   syncKind();
   panel.append(form);
-  fillTeacherSelect();
+  setTeacher('');
   if (kind.value === 'REASSIGN') void loadCandidates();
 }
 
