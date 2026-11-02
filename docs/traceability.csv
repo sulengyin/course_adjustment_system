@@ -110,3 +110,9 @@ P7D-3,口令,不得重置当前登录账号自己的口令，改密必须经旧�
 P7D-4,口令,重置理由必填并写入审计，可事后追问依据,docs/08 §2,P7D,,tests/auth/auth.spec.ts,verified
 P7D-5,口令,已停用账号不给重置，避免"重置了仍进不去"的误解,docs/08 §3,P7D,,scripts/reset-password.ts,verified
 P7D-6,口令,环境未设定的库拒绝执行重置,docs/07 §3,P7D,,scripts/reset-password.ts,verified
+P7E-1,作息,真实学期与作息同批导入且库中已有学期时拒绝覆盖,docs/09 §1,P7E,,tests/service/term-import.spec.ts,verified
+P7E-2,作息,起始日必须是周一否则整学期周次错位,docs/09 §4,P7E,,tests/service/term-import.spec.ts,verified
+P7E-3,作息,节次必须从1连续且结束晚于开始,docs/09 §4,P7E,,tests/service/term-import.spec.ts,verified
+P7E-4,作息,只有课务管理人员能导入作息，管理员不得代管,docs/09 §5 / permission-matrix,P7E,,tests/service/term-import.spec.ts,verified
+P7E-5,作息,真实作息标记 IMPORTED_UNVERIFIED 并留 IMPORT_TERM 审计,docs/09 §5,P7E,,tests/service/term-import.spec.ts,verified
+P7E-6,作息,大课间与眼保健操及午餐与课后服务时段不入 bell,docs/09 §2,P7E,,scripts/import-bell.ts,verified

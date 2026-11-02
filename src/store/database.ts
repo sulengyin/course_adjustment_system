@@ -954,6 +954,34 @@ export class CourseDatabase {
     for (const t of list) stmt.run(t.id, t.displayName, t.dataOrigin);
   }
 
+  countTerms(): number {
+    const row = this.db.prepare('SELECT COUNT(*) AS n FROM term').get() as { n: number };
+    return row.n;
+  }
+
+  /** 学期与作息同批写入：调用方负责校验，这里只管落库。 */
+  insertTerm(t: {
+    id: string;
+    label: string;
+    startMonday: string;
+    endDate: string;
+    firstWeekParity: WeekParity | null;
+    dataOrigin: DataOrigin;
+  }): void {
+    this.db
+      .prepare(
+        'INSERT INTO term(id, label, start_monday, end_date, first_week_parity, data_origin) VALUES(?,?,?,?,?,?)',
+      )
+      .run(t.id, t.label, t.startMonday, t.endDate, t.firstWeekParity, t.dataOrigin);
+  }
+
+  insertBell(termId: string, list: readonly BellEntry[], dataOrigin: DataOrigin): void {
+    const stmt = this.db.prepare(
+      'INSERT INTO bell(term_id, period, starts_at, ends_at, data_origin) VALUES(?,?,?,?,?)',
+    );
+    for (const b of list) stmt.run(termId, b.period, b.startsAt, b.endsAt, dataOrigin);
+  }
+
   refs(): {
     teachers: Array<{ id: string; name: string }>;
     classes: Array<{ id: string; name: string }>;
