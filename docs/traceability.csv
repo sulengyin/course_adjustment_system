@@ -104,3 +104,9 @@ P7C-3,环境,演示库拒绝导入真实名单与真实花名册,docs/07 §3,P7C
 P7C-4,环境,环境未设定的库拒绝启动服务,docs/07 §3,P7C,,scripts/serve.ts,verified
 P7C-5,环境,登录前即常驻显示环境横幅，不猜、不默认,docs/07 §5,P7C,,tests/ui/render.spec.ts,verified
 P7C-6,环境,备份 manifest 记录环境，恢复时可辨认来源库,docs/07 §5,P7C,,src/backup/service.ts,verified
+P7D-1,口令,只有具 RESET_PASSWORD 的管理员能重置他人口令,permission-matrix,P7D,,tests/auth/auth.spec.ts,verified
+P7D-2,口令,重置后旧会话全部失效且本人首登必须改密,docs/08 §2,P7D,,tests/auth/auth.spec.ts,verified
+P7D-3,口令,不得重置当前登录账号自己的口令，改密必须经旧口令校验,docs/08 §3,P7D,,tests/auth/auth.spec.ts,verified
+P7D-4,口令,重置理由必填并写入审计，可事后追问依据,docs/08 §2,P7D,,tests/auth/auth.spec.ts,verified
+P7D-5,口令,已停用账号不给重置，避免"重置了仍进不去"的误解,docs/08 §3,P7D,,scripts/reset-password.ts,verified
+P7D-6,口令,环境未设定的库拒绝执行重置,docs/07 §3,P7D,,scripts/reset-password.ts,verified

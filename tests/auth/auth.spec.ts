@@ -198,11 +198,34 @@ describe('登录与会话', () => {
     const login = h.auth.login('resetme', KNOWN, 'S');
     if (!login.ok) throw new Error('login failed');
 
-    const { initialPassword } = h.auth.resetPassword(h.admin, target.userId);
+    const { initialPassword } = h.auth.resetPassword(h.admin, target.userId, '本人到办公室申请');
     expect(h.auth.authenticate(login.token)).toBeNull();
     const next = h.auth.login('resetme', initialPassword);
     if (!next.ok) throw new Error('login failed');
     expect(next.principal.mustChangePassword).toBe(true);
+  });
+
+  it('只有管理员能重置他人口令', () => {
+    const h = harness();
+    const target = addUser(h, { loginName: 'resetme2', roles: ['S'] });
+    const asStaff = addUser(h, { loginName: 'staffonly', roles: ['S'] });
+    expect(() => h.auth.resetPassword(asStaff, target.userId, '试试')).toThrow(PolicyDeniedError);
+  });
+
+  it('不能重置当前登录账号自己的口令', () => {
+    const h = harness();
+    expect(() => h.auth.resetPassword(h.admin, h.admin.userId, '忘了')).toThrow(/不能重置当前登录账号/);
+  });
+
+  it('重置理由进审计，可事后追问为何重置', () => {
+    const h = harness();
+    const target = addUser(h, { loginName: 'resetme3', roles: ['S'] });
+    h.auth.resetPassword(h.admin, target.userId, '本人到办公室申请并核验证件');
+    const rows = h.db.auditLog.related({ objectIds: [target.userId], limit: 10 });
+    const row = rows.find((r) => r.action === 'RESET_PASSWORD');
+    expect(row).toBeDefined();
+    expect(row?.reason).toBe('本人到办公室申请并核验证件');
+    expect(row?.afterState).toBe('MUST_CHANGE');
   });
 });
 

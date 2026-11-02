@@ -22,6 +22,7 @@
     "smoke:ui": "tsx scripts/smoke-ui.ts",
     "bulk-users": "tsx scripts/bulk-create-users.ts",
     "import-teachers": "tsx scripts/import-teachers.ts",
+    "reset-password": "tsx scripts/reset-password.ts",
     "set-mode": "tsx scripts/set-mode.ts"
   },
   "devDependencies": {

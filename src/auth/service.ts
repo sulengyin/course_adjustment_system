@@ -40,6 +40,7 @@ export type AuthFailureCode =
   | 'USER_NOT_FOUND'
   | 'ROLE_NOT_GRANTABLE'
   | 'CANNOT_DISABLE_SELF'
+  | 'CANNOT_RESET_SELF'
   | 'WEAK_PASSWORD'
   | 'PASSWORD_CHANGE_REQUIRED'
   | 'POLICY_DENIED';
@@ -261,9 +262,21 @@ export class AuthService {
     });
   }
 
-  /** 重置为一次性口令；旧会话立即失效，本人首登必须改密。 */
-  resetPassword(principal: Principal, userId: string): { readonly initialPassword: string } {
+  /**
+   * 他人忘记口令时，由管理员重置为一次性口令；旧会话立即失效，本人首登必须改密。
+   *
+   * reason 必填：重置等于让一个账号的使用权重新流转一次，审计里必须留下"为什么"。
+   * 不接受重置自己的口令——那会让本次操作的会话当场失效，且绕开改密需要旧口令的校验。
+   */
+  resetPassword(
+    principal: Principal,
+    userId: string,
+    reason: string,
+  ): { readonly initialPassword: string } {
     this.requireAction(principal, 'RESET_PASSWORD');
+    if (principal.userId === userId) {
+      throw new AuthError('CANNOT_RESET_SELF', '不能重置当前登录账号的口令；要改自己的口令请用改密功能');
+    }
     const user = this.store.findUserById(userId);
     if (!user) throw new AuthError('USER_NOT_FOUND', '账号不存在');
     const at = this.now();
@@ -278,6 +291,7 @@ export class AuthService {
         objectType: 'USER',
         objectId: userId,
         afterState: 'MUST_CHANGE',
+        reason,
       });
     });
     return { initialPassword };
