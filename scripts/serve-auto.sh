@@ -1,13 +1,18 @@
 #!/usr/bin/env bash
-# 自愈启动：按当前内网地址启动/重启正式与演示实例。
+# 自愈启动：按当前内网地址启动/重启正式实例（演示实例按需开启）。
 #
 # 解决的问题：服务启动时把 IP 写死，WiFi 换一次地址，进程还在跑但没人连得上
 # （docs/11 §4）。本脚本每次运行时先取当前地址，只重启"地址不对或已经挂掉"的实例。
 #
 # 用法：
-#   bash scripts/serve-auto.sh            对齐一次（已在跑且地址正确则什么都不做）
-#   bash scripts/serve-auto.sh --status   只报告，不动进程
-#   bash scripts/serve-auto.sh --watch    持续看守，地址变了或进程挂了就自动重启
+#   bash scripts/serve-auto.sh              对齐一次（已在跑且地址正确则什么都不做）
+#   bash scripts/serve-auto.sh --status     只报告，不动进程
+#   bash scripts/serve-auto.sh --watch      持续看守，地址变了或进程挂了就自动重启
+#   bash scripts/serve-auto.sh --stop-demo  只停演示实例，保留正式实例
+#
+# 默认只拉正式实例。演示库只是一个可再生的沙盒（seed:demo 可重建，无真实数据），
+# 没必要每天占一个端口、一份日志和一条排查路径；需要培训或 T-04 两环境对照时：
+#   CA_WITH_DEMO=1 bash scripts/serve-auto.sh
 #
 # 可覆盖的环境变量：
 #   CA_IFACE        网卡名，默认 wlan0
@@ -15,6 +20,7 @@
 #   CA_DEMO_PORT    演示端口，默认 18088
 #   CA_PROD_DB      正式库路径
 #   CA_DEMO_DB      演示库路径
+#   CA_WITH_DEMO    设为 1 时同时拉起并看守演示实例，默认 0
 #
 # 退出码：0 全部就绪；1 有实例未能就绪；2 地址或前置条件不满足。
 
@@ -50,6 +56,13 @@ PROD_PORT="${CA_PROD_PORT:-18089}"
 DEMO_PORT="${CA_DEMO_PORT:-18088}"
 PROD_DB="${CA_PROD_DB:-/data/storage/el2/base/cache/ca-production/school.sqlite}"
 DEMO_DB="${CA_DEMO_DB:-/data/storage/el2/base/cache/ca-demo/demo.sqlite}"
+
+# 演示实例默认不常驻。写死成 1/0 而不是直接拿字符串做判断，
+# 避免 CA_WITH_DEMO=false 被当成"非空即真"。
+WITH_DEMO=0
+case "${CA_WITH_DEMO:-0}" in
+  1|true|yes|on) WITH_DEMO=1 ;;
+esac
 
 RUN_DIR="$ROOT/.run"
 mkdir -p "$RUN_DIR"
@@ -116,9 +129,11 @@ start_one() {
   local name="$1" port="$2" db="$3" logfile="$RUN_DIR/$name.log"
   [ -f "$db" ] || die "库不存在：$db（首次部署请先运行初始化脚本）"
   log "启动 $name：$IP:$port 库=$db"
+  # 末尾的 --role 只是给 ps 认人用的标记，serve.ts 不读位置参数（参数全来自环境变量）。
+  # 没有它就只能去读 /proc/<pid>/environ，而本机沙箱会拒绝，--stop-demo 会永远判成"没在跑"。
   # nohup + 重定向：关掉终端窗口服务也不受影响（docs/11 §3 第 1 条）。
   nohup env CA_BIND_ADDRESS="$IP" CA_PORT="$port" CA_DB_PATH="$db" \
-    npx tsx scripts/serve.ts >>"$logfile" 2>&1 &
+    npx tsx scripts/serve.ts "--role=$name" >>"$logfile" 2>&1 &
 }
 
 wait_ready() {
@@ -149,9 +164,42 @@ show_status() {
   local state="未就绪"
   healthy "$IP" "$PROD_PORT" && state="就绪"
   log "正式 $IP:$PROD_PORT → $state"
-  state="未就绪"
-  healthy "$IP" "$DEMO_PORT" && state="就绪"
-  log "演示 $IP:$DEMO_PORT → $state"
+  if [ "$WITH_DEMO" -eq 1 ]; then
+    state="未就绪"
+    healthy "$IP" "$DEMO_PORT" && state="就绪"
+    log "演示 $IP:$DEMO_PORT → $state（CA_WITH_DEMO=1，本次纳入看守）"
+  elif healthy "$IP" "$DEMO_PORT"; then
+    # 默认不常驻，但确实有实例在跑：多半是上次 CA_WITH_DEMO=1 留下的，说清楚现状而不是装作没有。
+    log "演示 $IP:$DEMO_PORT → 在运行（默认不常驻，本次不纳入看守；停掉用 --stop-demo）"
+  else
+    log "演示 未常驻（需要时：CA_WITH_DEMO=1 bash scripts/serve-auto.sh）"
+  fi
+}
+
+# 单独停掉演示实例：只杀带 --role=demo 标记的进程，不碰正式实例。
+# 默认不常驻之后，"临时开一次演示、用完关掉"是常见动作，不该逼人去 ps 里找 pid。
+# 不用 /proc/<pid>/environ 认人：本机沙箱对别的进程会返回 Permission denied，
+# 读不到就永远判成"没在跑"，停也停不掉。
+stop_demo() {
+  local pids
+  pids="$(ps -eo pid,args 2>/dev/null | awk '/[s]cripts\/serve\.ts --role=demo/ {print $1}' | tr '\n' ' ')"
+  pids="${pids# }"
+  pids="${pids% }"
+  if [ -z "$pids" ]; then
+    log "演示实例未在运行"
+    return 0
+  fi
+  log "停止演示实例：$pids"
+  # shellcheck disable=SC2086
+  kill $pids 2>/dev/null || true
+  local i
+  for i in $(seq 1 20); do
+    ps -eo pid,args 2>/dev/null | grep -q "[s]cripts/serve\.ts --role=demo" || { log "演示实例已停止"; return 0; }
+    sleep 0.5
+  done
+  log "演示实例未能退出，强制结束"
+  # shellcheck disable=SC2086
+  kill -9 $pids 2>/dev/null || true
 }
 
 MODE="once"
@@ -159,8 +207,9 @@ case "${1:-}" in
   "" ) MODE="once" ;;
   --status) MODE="status" ;;
   --watch) MODE="watch" ;;
-  -h|--help) sed -n '2,22p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
-  *) die "未知参数：$1（可用 --status / --watch）" ;;
+  --stop-demo) MODE="stop-demo" ;;
+  -h|--help) sed -n '2,25p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+  *) die "未知参数：$1（可用 --status / --watch / --stop-demo）" ;;
 esac
 
 IP="$(detect_ip)"
@@ -173,21 +222,35 @@ if [ "$MODE" = "status" ]; then
   exit 0
 fi
 
+if [ "$MODE" = "stop-demo" ]; then
+  stop_demo
+  exit 0
+fi
+
 if [ "$MODE" = "once" ]; then
-  # 地址变了之后旧进程还绑着旧地址：先看两个端口是否都真的通，
-  # 只要有一个不通，就整体停掉重来，避免新旧两套进程抢同一个库。
-  if ! healthy "$IP" "$PROD_PORT" || ! healthy "$IP" "$DEMO_PORT"; then
-    stop_serves
+  # 地址变了之后旧进程还绑着旧地址：需要拉起的实例只要有一个不通，
+  # 就整体停掉重来，避免新旧两套进程抢同一个库。
+  need_restart=0
+  healthy "$IP" "$PROD_PORT" || need_restart=1
+  if [ "$WITH_DEMO" -eq 1 ]; then
+    healthy "$IP" "$DEMO_PORT" || need_restart=1
   fi
+  [ "$need_restart" -eq 1 ] && stop_serves
   ok=0
   ensure "prod" "$PROD_PORT" "$PROD_DB" || ok=1
-  ensure "demo" "$DEMO_PORT" "$DEMO_DB" || ok=1
-  [ "$ok" -eq 0 ] && log "全部就绪" || die "有实例未能就绪，见上方日志"
+  if [ "$WITH_DEMO" -eq 1 ]; then
+    ensure "demo" "$DEMO_PORT" "$DEMO_DB" || ok=1
+  fi
+  if [ "$ok" -eq 0 ]; then
+    [ "$WITH_DEMO" -eq 1 ] && log "全部就绪" || log "正式就绪（演示未常驻）"
+  else
+    die "有实例未能就绪，见上方日志"
+  fi
   exit 0
 fi
 
 # watch：每 20 秒核对一次，地址变了或实例掉了就拉起。
-log "看守模式启动（每 20 秒核对一次，Ctrl-C 退出）"
+log "看守模式启动（每 20 秒核对一次，Ctrl-C 退出；演示常驻=$WITH_DEMO）"
 LAST_IP="$IP"
 while :; do
   NOW_IP="$(detect_ip)"
@@ -199,14 +262,14 @@ while :; do
     LAST_IP="$NOW_IP"
     stop_serves
     ensure "prod" "$PROD_PORT" "$PROD_DB" || true
-    ensure "demo" "$DEMO_PORT" "$DEMO_DB" || true
+    [ "$WITH_DEMO" -eq 1 ] && { ensure "demo" "$DEMO_PORT" "$DEMO_DB" || true; }
   else
     if ! healthy "$IP" "$PROD_PORT"; then
       log "正式实例无响应，重启"
       start_one "prod" "$PROD_PORT" "$PROD_DB"
       wait_ready "prod" "$PROD_PORT" || true
     fi
-    if ! healthy "$IP" "$DEMO_PORT"; then
+    if [ "$WITH_DEMO" -eq 1 ] && ! healthy "$IP" "$DEMO_PORT"; then
       log "演示实例无响应，重启"
       start_one "demo" "$DEMO_PORT" "$DEMO_DB"
       wait_ready "demo" "$DEMO_PORT" || true

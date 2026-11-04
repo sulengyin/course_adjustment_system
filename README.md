@@ -33,7 +33,8 @@ npm run typecheck # tsc --noEmit
 
 ### 起一个演示实例
 
-演示库只写虚构数据，且拒绝覆盖已有数据：
+演示库只写虚构数据，且拒绝覆盖已有数据。它**不常驻**——库可随时用 `seed:demo` 重建，
+没必要每天占一个端口和一份日志；需要时再拉起来：
 
 ```bash
 export CA_DB_PATH="$HOME/ca-demo.sqlite"      # 放在仓库外
@@ -41,6 +42,9 @@ npm run seed:demo                              # 生成虚构校历与演示账�
 
 CA_BIND_ADDRESS=192.168.x.x CA_PORT=18088 CA_DB_PATH="$CA_DB_PATH" npm run serve
 ```
+
+已经按 `serve:auto` 部署过时，更省事的做法是 `CA_WITH_DEMO=1 npm run serve:auto`，
+用完 `npm run serve:auto -- --stop-demo` 只停演示，正式实例不受影响。
 
 三个环境变量都是必填，**程序不猜默认值**——缺一项就报错退出。这样部署时不会悄悄绑到错误的地址上。
 
@@ -77,7 +81,7 @@ CA_DB_PATH=<库文件路径> CA_ADMIN_LOGIN=admin CA_ADMIN_NAME=教务管理员 
 
 | 命令 | 用途 |
 |---|---|
-| `npm run serve:auto` | 读当前网卡地址，两个实例（正式/演示）该重启就重启，日志在 `.run/` |
+| `npm run serve:auto` | 读当前网卡地址，保证正式实例在跑；`CA_WITH_DEMO=1` 时连演示实例一起管，`-- --stop-demo` 只停演示 |
 | `npm run backup` / `restore` | 库的备份与恢复 |
 | `npm run reset-password` | 管理员重置他人口令 |
 | `npm run grant-role` | 授予角色（如系统管理员 `A`） |
