@@ -19,7 +19,7 @@ const STATUS_LABEL = {
   REJECTED: '已拒绝',
   WITHDRAWN: '已撤回',
 };
-const KIND_LABEL = { REASSIGN: '调课', MOVE: '调整时间', CANCEL: '停课' };
+const KIND_LABEL = { REASSIGN: '代课', MOVE: '调整时间', CANCEL: '停课' };
 const VERDICT_LABEL = { ALLOWED: '可用', FORBIDDEN: '无此权限', ROLE_NOT_ASSIGNED: '待校方确认' };
 const EMERGENCY_STATUS = {
   REQUESTED: '已求助',
@@ -52,6 +52,10 @@ const state = {
   weekStart: null,
   changeTab: 'awaiting',
   pendingOccurrence: null,
+  /** 从"他人课表"点某一节跳过来时带的上下文；由调课页消费一次后清空。 */
+  pendingBehalf: null,
+  /** 导航切换会重建整个 shell，旧滑块的几何先存这里，新 DOM 从它出发补一段滑动。 */
+  navPillFrom: null,
   selectedSlot: null,
   selectedCase: null,
   emergencyPicked: null,
@@ -109,6 +113,124 @@ function el(tag, attrs = {}, ...kids) {
 
 function clear(node) {
   while (node.firstChild) node.removeChild(node.firstChild);
+}
+
+/**
+ * 搜索式教师选择器：默认不铺名单，输入姓名或工号才出结果。
+ *
+ * 全校一百多位老师平铺出来，"选人"就变成了翻名单；
+ * 输入两个字就能定位，是选人而不是找人。
+ */
+function createTeacherPicker(options = {}) {
+  const placeholder = options.placeholder ?? '输入姓名或工号';
+  const excludeTeacherId = options.excludeTeacherId ?? null;
+  const onPick = options.onPick ?? null;
+
+  const search = el('input', { type: 'search', class: 'picker-search', placeholder });
+  const list = el('div', { class: 'picker-list' });
+  const trigger = el('button', { type: 'button', class: 'btn picker-trigger' }, '选择教师…');
+  const close = el('button', { type: 'button', class: 'btn ghost' }, '收起');
+  const panel = el('div', { class: 'picker', hidden: true }, el('div', { class: 'row tight' }, search, close), list);
+  let picked = null;
+  let loading = false;
+  let loadError = false;
+
+  /**
+   * 课表页不预载 refs（只有调课页会），所以这里得自己补一次。
+   * 否则名单是空的，输什么都会落到“没有匹配的教师”，看起来像查无此人。
+   */
+  async function ensureTeachers() {
+    if ((state.refs?.teachers ?? []).length > 0) return;
+    loading = true;
+    loadError = false;
+    renderList();
+    const r = await api('/api/refs');
+    loading = false;
+    if (r.data?.ok) state.refs = r.data;
+    else loadError = true;
+    renderList();
+  }
+
+  function renderList() {
+    clear(list);
+    const query = search.value.trim().toLowerCase();
+    if (query === '') {
+      list.append(el('p', { class: 'hint' }, '输入姓名或工号后显示匹配的教师。'));
+      return;
+    }
+    if (loading) {
+      list.append(el('p', { class: 'hint' }, '正在读取教师名单…'));
+      return;
+    }
+    if (loadError) {
+      list.append(el('p', { class: 'hint' }, '教师名单读取失败，请收起后重新打开。'));
+      return;
+    }
+    const matched = (state.refs?.teachers ?? []).filter(
+      (t) =>
+        t.id !== excludeTeacherId &&
+        (t.name.toLowerCase().includes(query) || t.id.toLowerCase().includes(query)),
+    );
+    if (matched.length === 0) {
+      list.append(el('p', { class: 'hint' }, '没有匹配的教师。'));
+      return;
+    }
+    for (const t of matched.slice(0, 30)) {
+      list.append(
+        el(
+          'button',
+          {
+            class: 'picker-row',
+            type: 'button',
+            onclick: () => {
+              picked = t;
+              trigger.textContent = `已选：${t.name}`;
+              panel.hidden = true;
+              if (onPick) onPick(t);
+            },
+          },
+          el('span', { class: 'grow' }, t.name),
+          el('span', { class: 'hint' }, t.id),
+        ),
+      );
+    }
+    if (matched.length > 30) {
+      list.append(el('p', { class: 'hint' }, `还有 ${matched.length - 30} 位，继续输入以缩小范围`));
+    }
+  }
+
+  search.addEventListener('input', renderList);
+  trigger.addEventListener('click', () => {
+    panel.hidden = !panel.hidden;
+    if (!panel.hidden) {
+      if ((state.refs?.teachers ?? []).length === 0) ensureTeachers();
+      else renderList();
+      search.focus();
+    }
+  });
+  close.addEventListener('click', () => {
+    panel.hidden = true;
+  });
+
+  return {
+    root: el('div', { class: 'field' }, trigger, panel),
+    get picked() {
+      return picked;
+    },
+    reset(label = '选择教师…') {
+      picked = null;
+      trigger.textContent = label;
+      panel.hidden = true;
+      search.value = '';
+      clear(list);
+    },
+    /** 由外部指定选中的人（例如从他人课表点某一节跳过来），不触发 onPick。 */
+    setPicked(teacher) {
+      picked = teacher;
+      trigger.textContent = `已选：${teacher.name}`;
+      panel.hidden = true;
+    },
+  };
 }
 
 function toast(message, isError) {
@@ -490,6 +612,9 @@ function renderShell() {
     state.section = items[0][0];
   }
 
+  // 导航滑块要在 nav 进文档之后才能量到尺寸，所以这里只建节点，末尾再定位。
+  let navPill = null;
+
   for (const [key, label] of items) {
     nav.append(
       el(
@@ -497,12 +622,17 @@ function renderShell() {
         {
           type: 'button',
           'aria-current': state.section === key ? 'page' : null,
-          onclick: () => go(key),
+          onclick: () => {
+            // renderShell 会把整个导航换掉，先把滑块当前位置带走
+            state.navPillFrom = navPill ? navPill.snapshot() : null;
+            go(key);
+          },
         },
         label,
       ),
     );
   }
+  navPill = mountPill(nav, { activeSelector: '[aria-current="page"]', baseClass: 'nav' });
 
   // 一人多角色：换身份不等于换人。旧会话作废、新会话签发，审计里记 SWITCH_ROLE。
   const roleSelect =
@@ -575,7 +705,28 @@ function renderShell() {
   );
 
   app.append(header, nav, main, foot);
+  bindTopbarScroll();
+  // nav 已经进文档，这时候量 offsetLeft 才有意义
+  navPill.move({ from: state.navPillFrom });
+  state.navPillFrom = null;
   renderSection(main);
+}
+
+/**
+ * 顶栏滚动后加一道投影：内容从它下面穿过去时，边界需要一点重量。
+ * 只绑一次监听（renderShell 会反复重建顶栏，绑多次就会越积越多）。
+ */
+let topbarScrollBound = false;
+function bindTopbarScroll() {
+  if (topbarScrollBound) return;
+  if (typeof window.addEventListener !== 'function' || typeof document.querySelector !== 'function') return;
+  topbarScrollBound = true;
+  const sync = () => {
+    const bar = document.querySelector('.topbar');
+    if (bar) bar.classList.toggle('is-scrolled', (window.scrollY || 0) > 4);
+  };
+  window.addEventListener('scroll', sync, { passive: true });
+  sync();
 }
 
 function go(section) {
@@ -584,6 +735,97 @@ function go(section) {
   state.selectedCase = null;
   renderShell();
   window.scrollTo(0, 0);
+}
+
+/**
+ * 分段控件的滑块，导航与页签共用。
+ *
+ * 位置不按等分算：导航项和页签的文字长短都不一样（"待我确认（3）" vs "新建方案"），
+ * 用 (100% / n) * i 一定会越走越偏。这里直接量选中项的 offsetLeft/offsetWidth，
+ * 位移和宽度一起变，长短项都对得上。
+ *
+ * 三种时机要分开：
+ * - 首次定位：直接落位，不能滑——否则一进页面就看见方块从左上角飞过来；
+ * - 同一 DOM 内切换：CSS 过渡自己会滑，这是唯一"真动画"的路径；
+ * - 跨 DOM 重建（导航换区会重建整个 shell）：新节点先落在旧几何上，下一帧再动。
+ */
+function mountPill(container, options = {}) {
+  const selector = options.activeSelector ?? '[aria-selected="true"]';
+  const baseClass = options.baseClass ?? String(container.className || '').trim();
+
+  const pill = el('span', { class: 'pill', 'aria-hidden': 'true' });
+  container.append(pill);
+
+  let last = null;
+  let broken = null;
+
+  function mark(noPill) {
+    if (broken === noPill) return;
+    broken = noPill;
+    container.className = noPill ? `${baseClass} no-pill` : baseClass;
+  }
+
+  function measure() {
+    if (typeof container.querySelector !== 'function') return null;
+    const active = container.querySelector(selector);
+    if (!active) return null;
+    const geo = {
+      x: active.offsetLeft,
+      y: active.offsetTop,
+      w: active.offsetWidth,
+      h: active.offsetHeight,
+    };
+    if (![geo.x, geo.y, geo.w, geo.h].every((n) => Number.isFinite(n))) return null;
+    if (geo.w <= 0 || geo.h <= 0) return null;
+    // 页签在窄屏会折行：一颗胶囊跨不了两行，宁可不画，让按钮自己带底
+    const items = typeof container.querySelectorAll === 'function' ? container.querySelectorAll('button') : [];
+    for (const item of items) if (item.offsetTop !== geo.y) return null;
+    return geo;
+  }
+
+  function paint(geo, instant) {
+    if (!pill.style || typeof pill.style.setProperty !== 'function') return;
+    pill.style.setProperty('--pill-x', `${geo.x}px`);
+    pill.style.setProperty('--pill-y', `${geo.y}px`);
+    pill.style.setProperty('--pill-w', `${geo.w}px`);
+    pill.style.setProperty('--pill-h', `${geo.h}px`);
+    pill.className = instant ? 'pill is-on is-instant' : 'pill is-on';
+  }
+
+  function move(opts = {}) {
+    const target = measure();
+    if (!target) {
+      pill.className = 'pill';
+      last = null;
+      mark(true);
+      return;
+    }
+    mark(false);
+
+    const from = opts.from && last === null ? opts.from : null;
+    if (from) {
+      paint(from, true);
+      // 强制一次样式计算，把"旧位置"钉成过渡起点；
+      // 少了这一步，两次赋值会被合并，看到的还是瞬移。
+      if (typeof pill.offsetWidth === 'number') void pill.offsetWidth;
+      pill.className = 'pill is-on';
+      const step = () => paint(target, false);
+      if (typeof requestAnimationFrame === 'function') requestAnimationFrame(step);
+      else step();
+    } else if (last === null) {
+      paint(target, true);
+      pill.className = 'pill is-on';
+    } else {
+      paint(target, false);
+    }
+    last = target;
+  }
+
+  return {
+    move,
+    /** 换 DOM 之前先记下现在停在哪，供新节点接着滑 */
+    snapshot: () => last ?? measure(),
+  };
 }
 
 async function renderSection(main) {
@@ -639,30 +881,100 @@ async function sectionTimetable(view, token) {
   const from = state.weekStart;
   const to = addDays(from, 6);
 
+  // 周切换在窄屏占满一行等分三段：三个按钮各自宽度不同会显得散，且"本周"容易被挤到下一行孤零零一行。
   const toolbar = el(
     'div',
-    { class: 'row' },
+    { class: 'row week-bar' },
     el('label', { class: 'field' }, el('span', {}, '学期'), termToolbar(() => renderSectionRefresh())),
     el('div', { class: 'spacer grow' }),
-    el('button', { class: 'btn', type: 'button', onclick: () => shiftWeek(-1) }, '上一周'),
-    el('button', { class: 'btn', type: 'button', onclick: () => shiftWeek(1) }, '下一周'),
-    el('button', { class: 'btn', type: 'button', onclick: () => { state.weekStart = defaultWeekStart(term); renderSectionRefresh(); } }, '本周'),
-  );
-
-  view.append(
     el(
       'div',
-      { class: 'card' },
+      { class: 'week-nav' },
+      el('button', { class: 'btn', type: 'button', onclick: () => shiftWeek(-1) }, '上一周'),
       el(
-        'div',
-        { class: 'row' },
-        el('h2', { class: 'grow' }, `${term.label} · ${weekLabel(term, from)}`),
-        sourceBadge(term.dataOrigin),
+        'button',
+        { class: 'btn', type: 'button', onclick: () => { state.weekStart = defaultWeekStart(term); renderSectionRefresh(); } },
+        '本周',
       ),
-      el('p', { class: 'hint' }, `${from} ~ ${to}　（只显示本人承担的课次；已生效调课已叠加）`),
-      toolbar,
+      el('button', { class: 'btn', type: 'button', onclick: () => shiftWeek(1) }, '下一周'),
     ),
   );
+
+  const headCard = el(
+    'div',
+    { class: 'card' },
+    el(
+      'div',
+      { class: 'row' },
+      el('h2', { class: 'grow' }, `${term.label} · ${weekLabel(term, from)}`),
+      sourceBadge(term.dataOrigin),
+    ),
+    el('p', { class: 'hint' }, `${from} ~ ${to}　（只显示本人承担的课次；已生效调课已叠加）`),
+    toolbar,
+  );
+
+  // 两张课表不同时出现：看别人的课时先把自己的收起来，
+  // 否则上下两块格子长得一样，点错一格就是以别人的名义建了单。
+  const mineBox = el('div', { id: 'timetable-mine' });
+  const otherBox = el('div', { id: 'timetable-other', hidden: true });
+  mineBox.append(headCard);
+  view.append(mineBox, otherBox);
+
+  function backToMine() {
+    otherBox.hidden = true;
+    clear(otherBox);
+    mineBox.hidden = false;
+  }
+
+  function showOther(teacher, list, otherFrom) {
+    const canBehalf = capability('CREATE_CHANGE_ON_BEHALF') === 'ALLOWED';
+    clear(otherBox);
+    mineBox.hidden = true;
+    otherBox.hidden = false;
+    otherBox.append(
+      el(
+        'div',
+        { class: 'card' },
+        el(
+          'div',
+          { class: 'row' },
+          el('h2', { class: 'grow' }, `${teacher.name} 的课表`),
+          el('button', { class: 'btn', type: 'button', onclick: backToMine }, '返回我的课表'),
+        ),
+        el(
+          'p',
+          { class: 'hint' },
+          `${otherFrom} ~ ${addDays(otherFrom, 6)}　${
+            canBehalf
+              ? '点一节课可直接代他发起调课；提交后仍要他本人确认。'
+              : '只读视图，不能在此发起任何操作。'
+          }`,
+        ),
+      ),
+    );
+    otherBox.append(
+      renderBoard(list, otherFrom, {
+        readOnly: !canBehalf,
+        // 持有代发起能力时，点格子＝以对方名义发起；没有能力时格子是死的。
+        onSlotClick: canBehalf
+          ? (row) => {
+              if (row.cancelled) {
+                toast('这节课已由生效方案停课，不能再发起调课。', true);
+                return;
+              }
+              state.pendingBehalf = {
+                teacherId: teacher.id,
+                teacherName: teacher.name,
+                occurrenceId: row.occurrenceId,
+              };
+              state.pendingOccurrence = null;
+              state.changeTab = 'new';
+              go('changes');
+            }
+          : null,
+      }),
+    );
+  }
 
   const res = await api(`/api/timetable/me?termId=${encodeURIComponent(term.id)}&from=${from}&to=${to}`);
   if (token !== state.renderToken) return;
@@ -672,7 +984,7 @@ async function sectionTimetable(view, token) {
       code === 'NOT_A_TEACHER'
         ? '当前身份未绑定教师档案，因此没有"本人课表"。课务管理请使用导入预览与系统状态页。'
         : `无法读取课表（${code}）。`;
-    view.append(notice(text, 'warn'));
+    mineBox.append(notice(text, 'warn'));
     return;
   }
 
@@ -680,7 +992,7 @@ async function sectionTimetable(view, token) {
   const rows = Array.isArray(v.rows) ? v.rows : [];
 
   if (!v.complete) {
-    view.append(
+    mineBox.append(
       notice(
         '本视图不完整：存在无法判定的日期或课次。缺时间不等于没课，系统不会替你推断。',
         'warn',
@@ -688,17 +1000,18 @@ async function sectionTimetable(view, token) {
     );
   }
 
-  view.append(renderBoard(rows, from));
+  mineBox.append(renderBoard(rows, from));
+  mineBox.append(renderOtherTimetableCard(term, { onEnter: showOther }));
 
   const pending = el('div', { id: 'slot-detail' });
-  view.append(pending);
+  mineBox.append(pending);
   if (state.selectedSlot) renderSlotDetail(pending, state.selectedSlot, term);
 
   const issues = [];
   for (const d of v.unknownDays ?? []) issues.push(`${d.date}：${d.reason}`);
   for (const u of v.unresolved ?? []) issues.push(`${u.date ?? ''} ${u.templateId ?? ''}：${u.reason ?? 'UNRESOLVED'}`);
   if (issues.length > 0) {
-    view.append(
+    mineBox.append(
       el(
         'div',
         { class: 'card' },
@@ -730,7 +1043,11 @@ function todayIso() {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
-function renderBoard(rows, from) {
+function renderBoard(rows, from, options = {}) {
+  const readOnly = options.readOnly === true;
+  const bare = options.bare === true;
+  /** 点格子时做什么：默认是展开本页详情，他人课表则由调用方决定（如直接代发起）。 */
+  const onSlotClick = options.onSlotClick ?? null;
   const dates = WEEKDAYS.map((_, i) => addDays(from, i));
   const today = todayIso();
   const periods = [...new Set(rows.map((r) => r.period))].sort((a, b) => a - b);
@@ -762,7 +1079,7 @@ function renderBoard(rows, from) {
       if (items.length === 0) {
         cell.append(el('div', { class: 'slot empty' }));
       } else {
-        for (const row of items) cell.append(slotButton(row));
+        for (const row of items) cell.append(slotButton(row, readOnly, onSlotClick));
       }
       tr.append(cell);
     }
@@ -770,20 +1087,87 @@ function renderBoard(rows, from) {
   }
 
   const weekend = rows.filter((r) => !dates.includes(r.date));
-  const wrap = el('div', { class: 'card' });
-  wrap.append(el('table', { class: 'board' }, el('thead', {}, head), body));
+  // 窄屏放不下五个 60px 的格子：科目、班级、时间会被压缩成逐字竖排。
+  // 这里不改变周视图语义，只把表格放进横向滚动容器，格子保住可读宽度。
+  const wrap = bare ? el('div') : el('div', { class: 'card' });
+  const scroller = el('div', { class: 'board-scroll' });
+  scroller.append(el('table', { class: 'board' }, el('thead', {}, head), body));
+  wrap.append(scroller);
+  // 只在窄屏显示：宽屏能一屏放下，这句提示没有意义
+  wrap.append(el('p', { class: 'board-hint' }, '左右滑动查看整周'));
   if (weekend.length > 0) {
     wrap.append(
       el('div', { class: 'divider' }),
       el('h3', {}, '本时段内的非工作日课次'),
-      el('div', { class: 'stack' }, ...weekend.map((r) => slotButton(r))),
+      el('div', { class: 'stack' }, ...weekend.map((r) => slotButton(r, readOnly, onSlotClick))),
     );
   }
   return wrap;
 }
 
-function slotButton(row) {
-  const cls = `slot${row.certainty === 'UNKNOWN' ? ' is-unknown' : ''}${row.cancelled ? ' is-cancelled' : ''}`;
+/**
+ * 查看其他老师课表。
+ *
+ * permission-matrix 里"查看他人课表"对所有角色都是允许的，只显示班级/学科/时间。
+ * 能否从对方课表直接发起，取决于账号级能力 CREATE_CHANGE_ON_BEHALF：
+ * 没有这个能力的人看到的仍是纯只读视图，服务端也会拒绝代发起请求。
+ */
+function renderOtherTimetableCard(term, options = {}) {
+  const onEnter = options.onEnter ?? null;
+  const canBehalf = capability('CREATE_CHANGE_ON_BEHALF') === 'ALLOWED';
+  const status = el('p', { class: 'hint' });
+  const picker = createTeacherPicker({
+    excludeTeacherId: state.principal?.teacherId ?? null,
+    onPick: async (t) => {
+      const from = state.weekStart ?? defaultWeekStart(term);
+      const to = addDays(from, 6);
+      status.textContent = `正在读取 ${t.name} 的课表…`;
+      const r = await api(
+        `/api/timetable/teacher/${encodeURIComponent(t.id)}?termId=${encodeURIComponent(term.id)}&from=${from}&to=${to}`,
+      );
+      if (!r.data.ok) {
+        status.textContent = `无法读取该教师课表（${r.data.code ?? r.status}）。`;
+        return;
+      }
+      status.textContent = '';
+      if (onEnter) onEnter(t, r.data.view?.rows ?? [], from);
+    },
+  });
+
+  return el(
+    'div',
+    { class: 'card' },
+    el('h3', {}, '查看其他老师课表'),
+    el(
+      'p',
+      { class: 'hint' },
+      canBehalf
+        ? '输入姓名或工号查找。打开后你自己的课表会暂时收起；在对方课表里点一节课，可直接代他发起调课，提交后仍要他本人确认。'
+        : '输入姓名或工号查找。只显示班级、学科与时间，不含调课理由；此视图不能发起任何操作。',
+    ),
+    picker.root,
+    status,
+  );
+}
+
+function slotButton(row, readOnly = false, onSlotClick = null) {
+  const cls = `slot${row.certainty === 'UNKNOWN' ? ' is-unknown' : ''}${row.cancelled ? ' is-cancelled' : ''}${readOnly ? ' is-readonly' : ''}`;
+  const content = [
+    el('span', { class: 'subject' }, row.subjectName),
+    el('span', { class: 'meta' }, `${row.className} · ${row.startsAt ?? '时间未配置'}${row.endsAt ? `-${row.endsAt}` : ''}`),
+    el(
+      'span',
+      { class: 'tags' },
+      row.certainty === 'UNKNOWN' ? badge('时间待核验', 'warn') : null,
+      row.cancelled ? badge('已停课', 'danger') : null,
+    ),
+  ];
+  // 点击行为由调用方决定：他人课表里点一节＝代他发起，本页课表里点一节＝展开详情。
+  if (onSlotClick) {
+    return el('button', { class: cls, type: 'button', onclick: () => onSlotClick(row) }, ...content);
+  }
+  // 他人课表只读：能看排课事实，但不能从这里发起任何操作（否则会拿别人的课次去建单）。
+  if (readOnly) return el('div', { class: cls }, ...content);
   return el(
     'button',
     {
@@ -798,14 +1182,7 @@ function slotButton(row) {
         box.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
       },
     },
-    el('span', { class: 'subject' }, row.subjectName),
-    el('span', { class: 'meta' }, `${row.className} · ${row.startsAt ?? '时间未配置'}${row.endsAt ? `-${row.endsAt}` : ''}`),
-    el(
-      'span',
-      { class: 'tags' },
-      row.certainty === 'UNKNOWN' ? badge('时间待核验', 'warn') : null,
-      row.cancelled ? badge('已停课', 'danger') : null,
-    ),
+    ...content,
   );
 }
 
@@ -868,7 +1245,7 @@ function renderSlotDetail(box, row, term) {
               '为这节课求助',
             )
           : null,
-        el('span', { class: 'hint' }, '调课是"授课责任变更"，需要受影响教师本人逐人确认。'),
+        el('span', { class: 'hint' }, '调课是"授课责任变更"的总称（代课／对调／调整时间／停课），需要受影响教师本人逐人确认。'),
       ),
     ),
   );
@@ -892,39 +1269,75 @@ async function sectionChanges(view, token) {
     view.append(notice(`无法读取调课列表（${mine.data.code ?? mine.status}）。`, 'danger'));
     return;
   }
-  const submitted = mine.data.submitted ?? [];
-  const awaiting = mine.data.awaiting ?? [];
+  let submitted = mine.data.submitted ?? [];
+  let awaiting = mine.data.awaiting ?? [];
   state.refs = refs.data.ok ? refs.data : { teachers: [], classes: [], subjects: [] };
   state.pref = pref.data.ok ? pref.data : null;
 
   const tabs = el('div', { class: 'tabs' });
   const panel = el('div');
-  const entries = [
-    ['awaiting', `待我确认（${awaiting.length}）`],
-    ['submitted', `我发起的（${submitted.length}）`],
-    ['new', '新建方案'],
-  ];
-  for (const [key, label] of entries) {
-    tabs.append(
-      el(
-        'button',
-        {
-          type: 'button',
-          'aria-selected': state.changeTab === key ? 'true' : 'false',
-          onclick: () => {
-            state.changeTab = key;
-            renderSectionRefresh();
-          },
-        },
-        label,
-      ),
+  const label = {
+    awaiting: () => `待我确认（${awaiting.length}）`,
+    submitted: () => `我发起的（${submitted.length}）`,
+    new: () => '新建方案',
+  };
+  const buttons = new Map();
+  const tabsPill = mountPill(tabs, { activeSelector: '[aria-selected="true"]', baseClass: 'tabs' });
+
+  async function renderTabBody() {
+    if (state.changeTab === 'awaiting') renderAwaiting(panel, awaiting);
+    else if (state.changeTab === 'submitted') await renderSubmitted(panel, submitted, token);
+    else await renderNewChange(panel, term, token);
+  }
+
+  /**
+   * 页签切换只重建下面的内容，不重建 tabs 本身。
+   * 整块重建的话滑块每次都是"消失→在新位置出现"，滑不起来；
+   * 同一批 DOM 上改 aria-selected，CSS 过渡才会把胶囊从旧位置带过去。
+   */
+  let pendingTab = 0;
+  async function selectTab(key) {
+    if (key === state.changeTab) return;
+    state.changeTab = key;
+    for (const [k, btn] of buttons) btn.setAttribute('aria-selected', k === key ? 'true' : 'false');
+    tabsPill.move();
+    const seq = ++pendingTab;
+    clear(panel);
+    panel.append(el('p', { class: 'hint' }, '正在读取…'));
+    // 切页签仍重新拉一次列表：别人的申请随时会进来，只看进页面时那份快照会漏掉。
+    const fresh = await api('/api/changes/mine');
+    if (seq !== pendingTab || token !== state.renderToken) return;
+    if (fresh.data.ok) {
+      submitted = fresh.data.submitted ?? [];
+      awaiting = fresh.data.awaiting ?? [];
+      for (const [k, btn] of buttons) btn.textContent = label[k]();
+      // 计数变了按钮就变宽，滑块按新宽度再量一次（从当前位置续着滑）
+      tabsPill.move();
+    }
+    clear(panel);
+    if (!fresh.data.ok) {
+      panel.append(notice(`列表刷新失败（${fresh.data.code ?? fresh.status}），以下是进入本页时读到的数据。`, 'warn'));
+    }
+    await renderTabBody();
+  }
+
+  for (const key of ['awaiting', 'submitted', 'new']) {
+    const btn = el(
+      'button',
+      {
+        type: 'button',
+        'aria-selected': state.changeTab === key ? 'true' : 'false',
+        onclick: () => void selectTab(key),
+      },
+      label[key](),
     );
+    buttons.set(key, btn);
+    tabs.append(btn);
   }
   view.append(tabs, panel);
 
-  if (state.changeTab === 'awaiting') renderAwaiting(panel, awaiting);
-  else if (state.changeTab === 'submitted') await renderSubmitted(panel, submitted, token);
-  else await renderNewChange(panel, term, token);
+  tabsPill.move();
+  await renderTabBody();
 }
 
 function caseHeadLine(item) {
@@ -933,7 +1346,7 @@ function caseHeadLine(item) {
     ? `${cur.className} ${cur.subjectName} · ${cur.date} 第${cur.period}节 · ${cur.teacherName}`
     : `${item.occurrenceId}（课次已不存在）`;
   let right = '';
-  if (item.kind === 'REASSIGN') right = `调课给 ${item.toTeacherName ?? item.toTeacherId ?? '未指定'}`;
+  if (item.kind === 'REASSIGN') right = `请 ${item.toTeacherName ?? item.toTeacherId ?? '未指定'} 代课`;
   else if (item.kind === 'MOVE') right = `调整到 ${item.toDate ?? '未填写'} 第${item.toPeriod ?? '未填写'}节`;
   else right = '停课';
   return el('div', { class: 'item-line' }, el('span', {}, left), el('span', { class: 'arrow' }, '→'), el('span', {}, right));
@@ -1171,7 +1584,9 @@ async function renderNewChange(panel, term, token) {
   const options = rows.filter((r) => !r.cancelled);
   if (picked && !options.some((r) => r.occurrenceId === picked.occurrenceId)) options.unshift(picked);
 
-  if (options.length === 0) {
+  // 持有代发起能力的人，即使自己这一周没课，也要能进来替别人发起
+  const canOnBehalf = capability('CREATE_CHANGE_ON_BEHALF') === 'ALLOWED';
+  if (options.length === 0 && !canOnBehalf) {
     panel.append(
       notice(
         '本时段没有可发起调课的课次。请先在"我的课表"选择要调整的课次，或切换周次。',
@@ -1181,23 +1596,24 @@ async function renderNewChange(panel, term, token) {
     return;
   }
 
-  const occurrenceSelect = el(
-    'select',
-    {},
-    ...options.map((r) =>
-      el(
-        'option',
-        {
-          value: r.occurrenceId,
-          selected: picked?.occurrenceId === r.occurrenceId,
-        },
-        `${r.date} 第${r.period}节 · ${r.className} ${r.subjectName}`,
-      ),
-    ),
-  );
+  // 课次下拉会被"代发起"整体替换成对方那一周的课，所以先建空的再填
+  const occurrenceSelect = el('select', {});
+  function fillOccurrences(list, selectedId = null) {
+    clear(occurrenceSelect);
+    for (const r of list) {
+      occurrenceSelect.append(
+        el(
+          'option',
+          { value: r.occurrenceId, selected: r.occurrenceId === selectedId },
+          `${r.date} 第${r.period}节 · ${r.className} ${r.subjectName}`,
+        ),
+      );
+    }
+  }
+  fillOccurrences(options, picked?.occurrenceId ?? null);
 
   /**
-   * 调课对象：默认给"按规则排过序的候选"，而不是全校名单。
+   * 代课对象：默认给"按规则排过序的候选"，而不是全校名单。
    * 推荐不锁死选择——推荐之外仍然可选，界面会说明为什么要自行核对。
    *
    * 不用原生 select：候选上百人时，原生弹层在部分浏览器（尤其平板/手机）
@@ -1245,7 +1661,7 @@ async function renderNewChange(panel, term, token) {
     const others = candidates.filter((c) => !c.freeAtSlot && !c.teachesSubject && c.tier === 'CROSS_GRADE');
     return [
       { label: `推荐（该节次本人无课，共 ${recommended.length} 位）`, rows: recommended },
-      { label: `该节次有课 · 需先与对方对调（共 ${needSwap.length} 位）`, rows: needSwap },
+      { label: `该节次有课 · 需先解决该时段冲突（共 ${needSwap.length} 位）`, rows: needSwap },
       { label: `其他教师（共 ${others.length} 位）`, rows: others },
     ].filter((g) => g.rows.length > 0);
   }
@@ -1295,7 +1711,7 @@ async function renderNewChange(panel, term, token) {
         el(
           'p',
           { class: 'picker-empty' },
-          keyword === '' ? '没有可调课的教师。' : `没有匹配"${keyword}"的教师。清空过滤条件可看到全部。`,
+          keyword === '' ? '没有可代课的教师。' : `没有匹配"${keyword}"的教师。清空过滤条件可看到全部。`,
         ),
       );
     }
@@ -1355,17 +1771,17 @@ async function renderNewChange(panel, term, token) {
   function candidateErrorText(code, status) {
     switch (code) {
       case 'PASSWORD_CHANGE_REQUIRED':
-        return '请先修改初始口令，之后才能发起调课。';
+        return '请先修改初始口令，之后才能发起代课。';
       case 'NOT_A_TEACHER':
-        return '当前账号没有关联教师档案，不能发起调课。';
+        return '当前账号没有关联教师档案，不能发起代课。';
       case 'NOT_OWNER':
-        return '只能对自己任教的课次发起调课。';
+        return '只能对自己任教的课次发起代课。';
       case 'OCCURRENCE_CANCELLED':
-        return '该课次已停课，不能再发起调课。';
+        return '该课次已停课，不能再发起代课。';
       case 'OCCURRENCE_NOT_FOUND':
         return '课次不存在或已不在本学期范围内，请重新选择。';
       case 'FORBIDDEN':
-        return '当前身份不能发起调课。';
+        return '当前身份不能发起代课。';
       case 'BAD_INPUT':
         return '请求缺少必要信息，请重新选择课次。';
       case 'NO_OCCURRENCE':
@@ -1421,10 +1837,20 @@ async function renderNewChange(panel, term, token) {
     syncHint();
   }
 
-  occurrenceSelect.addEventListener('change', () => {
+  /** 课次一变，已选的对调对象与候选全部作废：它们只对上一节课成立。 */
+  function resetForOccurrence() {
     setTeacher('');
+    swapTeacher = null;
+    swapLesson = null;
+    swapOptions = [];
+    swapTrigger.textContent = '选择对调对象…';
+    swapTrigger.className = 'btn picker-trigger';
+    clear(swapLessons);
+    swapHint.textContent = '';
     if (kind.value === 'REASSIGN') void loadCandidates();
-  });
+    if (kind.value === 'SWAP') void loadSwapCandidates();
+  }
+  occurrenceSelect.addEventListener('change', resetForOccurrence);
 
   const dateField = el('input', { type: 'date', value: from });
   const periodField = el('input', { type: 'number', min: '1', max: '20', value: '1' });
@@ -1434,7 +1860,7 @@ async function renderNewChange(panel, term, token) {
   const targetTeacher = el(
     'div',
     { class: 'field' },
-    el('span', {}, '调课给'),
+    el('span', {}, '代课教师'),
     teacherTrigger,
     teacherPanel,
     candidateHint,
@@ -1448,26 +1874,326 @@ async function renderNewChange(panel, term, token) {
   );
   const targetNone = el('p', { class: 'hint' }, '停课：该课次不再计入有课，但仍保留在历史中。');
 
+  /* ---- 对调：先选人，再选对方的那一节课（必须落到日期 + 第几节） ---- */
+  const swapSearch = el('input', { type: 'search', class: 'picker-search', placeholder: '输入姓名过滤' });
+  const swapList = el('div', { class: 'picker-list' });
+  const swapTrigger = el('button', { type: 'button', class: 'btn picker-trigger' }, '选择对调对象…');
+  const swapClose = el('button', { type: 'button', class: 'btn ghost' }, '收起');
+  const swapPanel = el(
+    'div',
+    { class: 'picker', hidden: true },
+    el('div', { class: 'row tight' }, swapSearch, swapClose),
+    swapList,
+  );
+  const swapLessons = el('div', { class: 'swap-lessons' });
+  const swapHint = el('p', { class: 'hint' });
+  let swapState = 'idle';
+  let swapError = '';
+  let swapRecommended = [];
+  let swapNotRecommended = [];
+  let swapTeacher = null;
+  let swapOptions = [];
+  let swapLesson = null;
+
+  function swapSlotText(option) {
+    return `${option.date} 第${option.period}节`;
+  }
+
+  function renderSwapList() {
+    clear(swapList);
+    if (swapState !== 'ready') {
+      swapList.append(
+        el(
+          'p',
+          { class: 'picker-empty' },
+          swapState === 'loading' ? '正在按规则计算对调对象…' : swapError,
+        ),
+      );
+      return;
+    }
+    const keyword = swapSearch.value.trim();
+    const groups = [
+      { label: `推荐（本学期任教该班，共 ${swapRecommended.length} 位）`, rows: swapRecommended },
+      { label: `不推荐（共 ${swapNotRecommended.length} 位，仍可选）`, rows: swapNotRecommended },
+    ];
+    let shown = 0;
+    for (const group of groups) {
+      const rows =
+        keyword === ''
+          ? group.rows
+          : group.rows.filter((c) => (c.teacherName ?? c.teacherId).includes(keyword));
+      if (rows.length === 0) continue;
+      swapList.append(el('div', { class: 'picker-group' }, group.label));
+      for (const c of rows) {
+        shown += 1;
+        const first = c.sampleOptions?.[0];
+        const meta = c.recommended
+          ? `${c.viableCount} 节可换${first ? `｜如 ${swapSlotText(first)}` : ''}`
+          : c.reasons.join('；');
+        const row = el(
+          'button',
+          {
+            type: 'button',
+            class: `picker-row${swapTeacher?.teacherId === c.teacherId ? ' is-selected' : ''}`,
+          },
+          el('span', { class: 'picker-name' }, c.teacherName ?? c.teacherId),
+          el('span', { class: 'picker-tag' }, TIER_LABEL[c.tier] ?? c.tier),
+          el('span', { class: 'picker-meta' }, meta),
+        );
+        row.addEventListener('click', () => {
+          swapPanel.hidden = true;
+          void pickSwapTeacher(c);
+        });
+        swapList.append(row);
+      }
+    }
+    if (shown === 0) swapList.append(el('p', { class: 'picker-empty' }, '没有匹配的教师。'));
+  }
+
+  async function loadSwapCandidates() {
+    const occurrenceId = occurrenceSelect.value;
+    if (!occurrenceId) {
+      swapState = 'error';
+      swapError = '请先选择要换出的课次。';
+      swapTrigger.disabled = true;
+      swapTrigger.textContent = '对调对象不可用';
+      renderSwapList();
+      return;
+    }
+    swapState = 'loading';
+    swapError = '';
+    swapTrigger.disabled = true;
+    swapTrigger.textContent = '正在计算对调对象…';
+    let r;
+    try {
+      r = await api(
+        `/api/changes/swap-candidates?termId=${encodeURIComponent(term.id)}&occurrenceId=${encodeURIComponent(occurrenceId)}`,
+      );
+    } catch {
+      if (token !== state.renderToken) return;
+      swapState = 'error';
+      swapError = '网络不通，暂时拿不到对调对象。';
+      swapTrigger.textContent = '对调对象不可用';
+      renderSwapList();
+      return;
+    }
+    if (token !== state.renderToken) return;
+    if (!r.data.ok) {
+      swapRecommended = [];
+      swapNotRecommended = [];
+      swapState = 'error';
+      swapError = candidateErrorText(r.data.code, r.status);
+      swapTrigger.textContent = '对调对象不可用';
+      renderSwapList();
+      return;
+    }
+    swapRecommended = (r.data.recommended ?? []).map((c) => ({ ...c, recommended: true }));
+    swapNotRecommended = (r.data.notRecommended ?? []).map((c) => ({ ...c, recommended: false }));
+    swapState = 'ready';
+    swapTrigger.disabled = false;
+    swapTrigger.textContent = '选择对调对象…';
+    if (!swapPanel.hidden) renderSwapList();
+  }
+
+  async function pickSwapTeacher(candidate) {
+    swapTeacher = candidate;
+    swapLesson = null;
+    swapOptions = [];
+    swapTrigger.textContent = `已选：${candidate.teacherName ?? candidate.teacherId}`;
+    swapTrigger.className = 'btn picker-trigger primary';
+    renderSwapLessons();
+    if (candidate.viableCount === 0) return;
+
+    const occurrenceId = occurrenceSelect.value;
+    let r;
+    try {
+      r = await api(
+        `/api/changes/swap-options?termId=${encodeURIComponent(term.id)}&occurrenceId=${encodeURIComponent(occurrenceId)}&teacherId=${encodeURIComponent(candidate.teacherId)}`,
+      );
+    } catch {
+      if (token !== state.renderToken) return;
+      swapHint.textContent = '网络不通，拿不到对方的课次。';
+      return;
+    }
+    if (token !== state.renderToken) return;
+    if (!r.data.ok) {
+      swapHint.textContent = candidateErrorText(r.data.code, r.status);
+      return;
+    }
+    swapOptions = r.data.options ?? [];
+    renderSwapLessons();
+  }
+
+  function renderSwapLessons() {
+    clear(swapLessons);
+    if (!swapTeacher) return;
+    if (swapTeacher.viableCount === 0) {
+      swapHint.textContent = `这位教师暂无可换课次：${swapTeacher.reasons.join('；')}`;
+      return;
+    }
+    if (swapOptions.length === 0) {
+      swapHint.textContent = '正在读取对方的课次…';
+      return;
+    }
+    swapLessons.append(
+      el('div', { class: 'picker-group' }, '选择对方要让出的那一节课（冲突项不可选，并写明原因）'),
+    );
+    for (const option of swapOptions) {
+      const blocked = (option.blockedReasons ?? []).length > 0;
+      const meta = blocked
+        ? option.blockedReasons.join('；')
+        : `${option.className} ${option.subjectName}${
+            (option.hints ?? []).length > 0 ? `｜提示：${option.hints.join('；')}` : ''
+          }`;
+      const row = el(
+        'button',
+        {
+          type: 'button',
+          class: `picker-row${swapLesson?.occurrenceId === option.occurrenceId ? ' is-selected' : ''}`,
+          disabled: blocked,
+        },
+        el('span', { class: 'picker-name' }, swapSlotText(option)),
+        el('span', { class: 'picker-meta' }, meta),
+      );
+      if (!blocked) {
+        row.addEventListener('click', () => {
+          swapLesson = option;
+          renderSwapLessons();
+        });
+      }
+      swapLessons.append(row);
+    }
+    swapHint.textContent = swapLesson
+      ? `已选：${swapSlotText(swapLesson)}（${swapLesson.className} ${swapLesson.subjectName}）`
+      : '';
+  }
+
+  swapTrigger.addEventListener('click', () => {
+    swapPanel.hidden = !swapPanel.hidden;
+    if (!swapPanel.hidden) {
+      renderSwapList();
+      swapSearch.focus();
+    }
+  });
+  swapClose.addEventListener('click', () => {
+    swapPanel.hidden = true;
+  });
+  swapSearch.addEventListener('input', renderSwapList);
+  swapSearch.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') swapPanel.hidden = true;
+  });
+
+  const targetSwap = el(
+    'div',
+    { class: 'field' },
+    el('span', {}, '对调对象'),
+    swapTrigger,
+    swapPanel,
+    swapLessons,
+    swapHint,
+  );
+
+  // 默认对调：这是老师之间最常见的互换，先按它给出对象；要改成代课/调整时间/停课再自己切。
+  // 顺序也按这个来，避免下拉第一项和默认值不一致。
   const kind = el(
     'select',
     {},
-    el('option', { value: 'REASSIGN' }, '调课（换授课教师）'),
+    el('option', { value: 'SWAP' }, '对调（与另一位教师互换一节课）'),
+    el('option', { value: 'REASSIGN' }, '代课（请另一位教师上这节课）'),
     el('option', { value: 'MOVE' }, '调整时间（换日期/节次）'),
     el('option', { value: 'CANCEL' }, '停课'),
   );
+
+  /* ---- 代他人发起：只有持有账号级能力 CREATE_CHANGE_ON_BEHALF 的人才看得到 ---- */
+  let behalfActive = false;
+  let behalfTeacher = null;
+  const behalfStatus = el('p', { class: 'hint' });
+  const behalfBox = el('div', { hidden: true });
+
+  async function loadBehalfOccurrences(teacher, selectedId = null) {
+    const from = state.weekStart ?? defaultWeekStart(term);
+    const to = addDays(from, 6);
+    behalfStatus.textContent = `正在读取 ${teacher.name} 的课次…`;
+    const r = await api(
+      `/api/timetable/teacher/${encodeURIComponent(teacher.id)}?termId=${encodeURIComponent(term.id)}&from=${from}&to=${to}`,
+    );
+    if (!r.data.ok) {
+      fillOccurrences([]);
+      behalfStatus.textContent = `无法读取 ${teacher.name} 的课次（${r.data.code ?? r.status}）。`;
+      return;
+    }
+    const list = (r.data.view?.rows ?? []).filter((x) => !x.cancelled);
+    fillOccurrences(list, selectedId);
+    resetForOccurrence();
+    behalfStatus.textContent =
+      list.length === 0
+        ? `${teacher.name} 在本周没有可调课的课次，换一周或选别人。`
+        : `正在代 ${teacher.name} 发起（本周 ${list.length} 节课）。提交后仍需他本人确认，系统不会替他同意。`;
+  }
+
+  const behalfPicker = canOnBehalf
+    ? createTeacherPicker({
+        excludeTeacherId: state.principal?.teacherId ?? null,
+        onPick: (t) => {
+          behalfTeacher = t;
+          void loadBehalfOccurrences(t);
+        },
+      })
+    : null;
+
+  const behalfToggle = canOnBehalf
+    ? el(
+        'button',
+        {
+          type: 'button',
+          class: 'btn',
+          onclick: () => {
+            behalfActive = !behalfActive;
+            behalfBox.hidden = !behalfActive;
+            behalfToggle.textContent = behalfActive ? '取消代发起' : '代其他老师发起';
+            if (!behalfActive) {
+              behalfTeacher = null;
+              behalfPicker.reset();
+              behalfStatus.textContent = '';
+              fillOccurrences(options, state.pendingOccurrence?.occurrenceId ?? null);
+              resetForOccurrence();
+            }
+          },
+        },
+        '代其他老师发起',
+      )
+    : null;
+
+  if (canOnBehalf) behalfBox.append(behalfPicker.root, behalfStatus);
+
+  // 从"他人课表"点某一节跳过来：直接进入代发起，并选中那一节。
+  // 这里不动 state.pendingOccurrence——它记的是"我自己的课次"，两种上下文不能混。
+  const pendingBehalf = state.pendingBehalf;
+  if (pendingBehalf) state.pendingBehalf = null;
+  if (canOnBehalf && pendingBehalf) {
+    behalfActive = true;
+    behalfBox.hidden = false;
+    behalfToggle.textContent = '取消代发起';
+    behalfTeacher = { id: pendingBehalf.teacherId, name: pendingBehalf.teacherName };
+    behalfPicker.setPicked(behalfTeacher);
+    void loadBehalfOccurrences(behalfTeacher, pendingBehalf.occurrenceId);
+  }
 
   const reason = el('textarea', { placeholder: '可选。说明会作为方案的一部分留存；他人不会看到你的私人说明。' });
   const result = el('div');
 
   function syncKind() {
     targetTeacher.hidden = kind.value !== 'REASSIGN';
+    targetSwap.hidden = kind.value !== 'SWAP';
     targetMove.hidden = kind.value !== 'MOVE';
     targetNone.hidden = kind.value !== 'CANCEL';
   }
   kind.addEventListener('change', () => {
     syncKind();
-    // 切到"调课"时才需要候选名单；已加载过就复用，避免重复请求。
+    // 切到"代课"时才需要候选名单；已加载过就复用，避免重复请求。
     if (kind.value === 'REASSIGN' && candidates.length === 0) void loadCandidates();
+    // 对调每次都重算：口径随课次与偏好变化，缓存下来只会给出过期建议
+    if (kind.value === 'SWAP') void loadSwapCandidates();
   });
 
   const form = el(
@@ -1477,9 +2203,39 @@ async function renderNewChange(panel, term, token) {
       onsubmit: async (event) => {
         event.preventDefault();
         const occurrenceId = occurrenceSelect.value;
+        // 代发起必须先选人：没选人时下面的课次还是"我自己"的，提交出去就是另一回事了。
+        if (behalfActive && !behalfTeacher) {
+          clear(result);
+          result.append(notice('请先选择要代替哪位老师发起。', 'warn'));
+          return;
+        }
+        if (occurrenceId === '') {
+          clear(result);
+          result.append(notice('请选择要调整的课次。', 'warn'));
+          return;
+        }
+        // 这笔方案"算谁的"：本人发起是自己，代发起是被代教师。
+        // 对调的第二条（对方把课给谁）必须跟着这个走，否则会把课换给代办人。
+        const ownerTeacherId = behalfActive && behalfTeacher ? behalfTeacher.id : state.principal.teacherId;
         // 除"调整时间""停课"外都要指定教师。候选没算出来时不让提交：
         // 此时系统不知道谁能接这节课，硬提交只会把冲突推给对方和审批人。
-        if (kind.value !== 'MOVE' && kind.value !== 'CANCEL') {
+        if (kind.value === 'SWAP') {
+          if (swapState !== 'ready') {
+            clear(result);
+            result.append(notice(swapError || '对调对象尚未就绪，请稍候再试。', 'warn'));
+            return;
+          }
+          if (!swapTeacher) {
+            clear(result);
+            result.append(notice('请先选择对调对象。', 'warn'));
+            return;
+          }
+          if (!swapLesson) {
+            clear(result);
+            result.append(notice('请选择对方要与你对调的那一节课。', 'warn'));
+            return;
+          }
+        } else if (kind.value !== 'MOVE' && kind.value !== 'CANCEL') {
           if (candidateState !== 'ready') {
             clear(result);
             result.append(notice(candidateError || '候选名单尚未就绪，请稍候再试。', 'warn'));
@@ -1487,23 +2243,37 @@ async function renderNewChange(panel, term, token) {
           }
           if (selectedTeacherId === '') {
             clear(result);
-            result.append(notice('请先选择调课给哪位教师。', 'warn'));
+            result.append(notice('请先选择由哪位教师代课。', 'warn'));
             return;
           }
         }
+        // 对调＝同一笔方案里的两条代课：我给对方，对方给我。
+        // 服务端按变更后的整体状态判冲突，必要确认人自动是双方。
+        const items =
+          kind.value === 'SWAP'
+            ? [
+                { occurrenceId, kind: 'REASSIGN', toTeacherId: swapTeacher.teacherId },
+                {
+                  occurrenceId: swapLesson.occurrenceId,
+                  kind: 'REASSIGN',
+                  toTeacherId: ownerTeacherId,
+                },
+              ]
+            : [
+                {
+                  occurrenceId,
+                  kind: kind.value,
+                  toTeacherId: kind.value === 'REASSIGN' ? selectedTeacherId : null,
+                  toDate: kind.value === 'MOVE' ? dateField.value : null,
+                  toPeriod: kind.value === 'MOVE' ? Number(periodField.value) : null,
+                },
+              ];
         const payload = {
           termId: term.id,
-          items: [
-            {
-              occurrenceId,
-              kind: kind.value,
-              toTeacherId: kind.value === 'REASSIGN' ? selectedTeacherId : null,
-              toDate: kind.value === 'MOVE' ? dateField.value : null,
-              toPeriod: kind.value === 'MOVE' ? Number(periodField.value) : null,
-            },
-          ],
+          items,
           reason: reason.value.trim() === '' ? null : reason.value.trim(),
           idempotencyKey: newIdempotencyKey(),
+          onBehalfOfTeacherId: behalfActive && behalfTeacher ? behalfTeacher.id : null,
         };
         clear(result);
         const r = await api('/api/changes', { method: 'POST', body: payload });
@@ -1511,14 +2281,35 @@ async function renderNewChange(panel, term, token) {
         if (r.data.ok) {
           state.pendingOccurrence = null;
           reason.value = '';
+          swapTeacher = null;
+          swapLesson = null;
+          swapOptions = [];
+          swapTrigger.textContent = '选择对调对象…';
+          swapTrigger.className = 'btn picker-trigger';
+          clear(swapLessons);
+          swapHint.textContent = '';
+          // 代发起提交完，把课次列表切回自己的，避免下一笔误用对方的课次
+          if (canOnBehalf) {
+            behalfActive = false;
+            behalfTeacher = null;
+            behalfBox.hidden = true;
+            behalfToggle.textContent = '代其他老师发起';
+            behalfPicker.reset();
+            behalfStatus.textContent = '';
+            fillOccurrences(options, null);
+            resetForOccurrence();
+          }
         }
       },
     },
     el('h3', {}, '新建调课方案'),
     el('p', { class: 'hint' }, '提交后进入"待确认"，必须由受影响的教师本人逐人确认，系统不会自动视为同意。'),
+    canOnBehalf ? el('div', { class: 'row tight' }, behalfToggle) : null,
+    behalfBox,
     el('label', { class: 'field' }, el('span', {}, '课次'), occurrenceSelect),
     el('label', { class: 'field' }, el('span', {}, '变更方式'), kind),
     targetTeacher,
+    targetSwap,
     targetMove,
     targetNone,
     el('label', { class: 'field' }, el('span', {}, '发起说明'), reason),
@@ -1528,6 +2319,8 @@ async function renderNewChange(panel, term, token) {
   syncKind();
   panel.append(form);
   setTeacher('');
+  // 进来就按"对调"算一次对象，用户不必先点一下才有内容
+  if (kind.value === 'SWAP') void loadSwapCandidates();
   if (kind.value === 'REASSIGN') void loadCandidates();
 }
 
@@ -1678,7 +2471,7 @@ async function renderSettings(view, token) {
     const r = await api('/api/preferences/change', { method: 'PUT', body: form.read() });
     toast(
       r.data.ok
-        ? '已保存为我的筛选偏好，发起调课时按这个口径推荐。'
+        ? '已保存为我的筛选偏好，发起代课时按这个口径推荐。'
         : `保存失败（${r.data.code ?? r.status}）`,
       !r.data.ok,
     );
@@ -1703,7 +2496,7 @@ async function renderSettings(view, token) {
       'div',
       { class: 'page-head' },
       el('h2', {}, '设置'),
-      el('p', { class: 'hint' }, '这里只改"怎么给你看"，不改业务规则；改完在下一次发起调课时生效。'),
+      el('p', { class: 'hint' }, '这里只改"怎么给你看"，不改业务规则；改完在下一次发起代课时生效。'),
     ),
     el(
       'div',
@@ -1711,7 +2504,7 @@ async function renderSettings(view, token) {
       el(
         'div',
         { class: 'row' },
-        el('h3', { class: 'grow' }, '调课候选筛选'),
+        el('h3', { class: 'grow' }, '代课候选筛选'),
         badge(PREF_SOURCE_LABEL[data?.source] ?? '当前口径未知', data?.source === 'NEUTRAL' ? null : 'brand'),
       ),
       el(

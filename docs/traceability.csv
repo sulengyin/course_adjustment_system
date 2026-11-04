@@ -151,3 +151,22 @@ P7I-11,调课,偏好入口只在设置页；发起调课的页面不摆筛选开
 P7I-12,调课,候选预览不带筛选条件时按调用者生效偏好计算,docs/13 §7.4,P7I,,tests/server/http.spec.ts,verified
 P7I-13,调课,候选不可用时不得回落全校名单：说明原因、禁止提交,docs/13 §7.5,P7I,,tests/ui/render.spec.ts,verified
 P7I-14,调课,预览不传筛选条件时按调用者生效偏好计算，来源如实,docs/13 §7.4,P7I,,tests/server/http.spec.ts,verified
+P7J-1,调课,语数教师当天原本没课且接手上午第4节时只提示"可能需专程到校"，不排除、不影响排序,docs/13 §7.6,P7J,,tests/domain/candidate.spec.ts; tests/service/candidate.spec.ts,verified
+P7J-2,调课,跨天对调先选人再选课；语数教师让出后当天没课或只剩上午第4节时只提示不排除,docs/13 §7.7,P7J,,tests/domain/candidate.spec.ts; tests/service/candidate.spec.ts; tests/server/http.spec.ts,verified
+P7K-1,调课,术语统一：调课是总称；代课=单节课单向换人；对调=两人各让一节互换；调整时间=改日期节次；停课=取消课次,docs/domain-glossary.md §7; docs/13 术语,P7K,,docs/domain-glossary.md,verified
+P7K-2,调课,界面不再用"调课"指代换教师：新建方案的选项写"代课（请另一位教师上这节课）"，候选对象文案同步,docs/domain-glossary.md §7,P7K,,tests/ui/render.spec.ts,verified
+P7L-1,调课,对调对象只推荐本学期任教该班的教师，且至少有一节可换的课；同年级/跨年级进入不推荐并写明理由,docs/13 §7.8,P7L,,tests/service/candidate.spec.ts; tests/server/http.spec.ts,verified
+P7L-2,调课,对调推荐必须落到具体日期+节次；推荐/不推荐分两组展示，不推荐的教师仍可选,docs/13 §7.8,P7L,,tests/ui/render.spec.ts,verified
+P7L-3,调课,对调后的当天课数与连堂按"换完之后"实算，同一天换课不得按+1近似,docs/13 §7.8,P7L,,tests/domain/candidate.spec.ts,verified
+P7M-1,性能,有效课次投影改为 base ∪ overlay 两段查询，两段各自命中索引；结果与 COALESCE 写法逐行一致（换教师/改期/停课/改期跨区间全覆盖）,docs/reports/P7-性能-课表查询可索引化.md,P7M,,tests/store/effective-query.spec.ts; tests/store/views-consistency.spec.ts,verified
+P7M-2,性能,调课推荐只取"同班教师 + 我"的课次，不再把整学期四万行搬进内存,docs/reports/P7-性能-课表查询可索引化.md,P7M,,tests/service/candidate.spec.ts,verified
+P7M-3,性能,按日期取整段课表（某天全校）命中 (term_id,date) 索引；按教师批量取命中 (term_id,teacher_id,date),docs/reports/P7-性能-课表查询可索引化.md,P7M,,tests/store/effective-query.spec.ts,verified
+P7N-1,调课,对调只列未发生过的课次：对方早于今天的课次不出现在列表；发起人自己的课已过去时全部不可选并写明原因,docs/13 §7.9.1,P7N,,tests/service/candidate.spec.ts; tests/server/http.spec.ts,verified
+P7N-2,调课,对调要求两节单节时长相等：第4节(20分钟)只能与第4节对调，其余节次不得与第4节互换；按时长而非节次号判定,docs/13 §7.9.2,P7N,,tests/domain/candidate.spec.ts; tests/service/candidate.spec.ts,verified
+P7N-3,调课,课次缺结束时间算不出时长时不可对调，理由写明"缺少起止时间",docs/13 §7.9.2,P7N,,tests/domain/candidate.spec.ts; tests/service/candidate.spec.ts,verified
+P7P-1,界面,新建调课方案的变更方式默认"对调"，进入即按对调计算对象；代课/调整时间/停课由用户自行切换,docs/13 §7.8,P7P,,tests/ui/render.spec.ts,verified
+P7Q-1,调课,代他人发起：新增账号级能力 CREATE_CHANGE_ON_BEHALF，方案记被代教师名下（submitted_by）、实际操作人记 created_by，确认仍须本人,docs/13 §7.10; docs/permission-matrix.md 文末,P7Q,,tests/service/change.spec.ts,verified
+P7Q-2,权限,账号级授权只能补 DENY、不能打开 TBD_BLOCKED；必须登记依据、禁止自授、撤销立即作废会话,docs/permission-matrix.md 文末,P7Q,,tests/auth/auth.spec.ts,verified
+P7Q-3,界面,查看他人课表对全体登录教师开放且只读；选教师改为输入即筛选（不再平铺全校名单）,docs/permission-matrix.md 操作表,P7Q,,tests/ui/render.spec.ts,verified
+P7R-1,界面,打开他人课表后本人课表暂时收起（#timetable-mine 隐藏），页面只留对方一张表并可"返回我的课表"，避免两张同形表格点错一格,docs/13 §7.10,P7R,,tests/ui/render.spec.ts,verified
+P7R-2,调课,持有 CREATE_CHANGE_ON_BEHALF 者可直接点他人课表里的一节课进入代发起并选中该课次；无此能力者格子为 div、纯只读,docs/13 §7.10; docs/permission-matrix.md 文末,P7R,,tests/ui/render.spec.ts,verified

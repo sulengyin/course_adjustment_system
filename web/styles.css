@@ -34,13 +34,24 @@
   --shadow-3: 0 10px 30px rgba(20, 35, 60, 0.14), 0 2px 6px rgba(20, 35, 60, 0.07);
   --shadow-brand: 0 1px 2px rgba(47, 127, 209, 0.35), 0 6px 16px rgba(47, 127, 209, 0.20);
 
-  /* 动效：统一时长与曲线，避免各写各的 */
+  /* 动效：统一时长与曲线，避免各写各的。
+     --e-out    收尾快、起步利落，用于入场与位移；
+     --e-soft   均匀柔和，用于颜色、阴影这类不该抢戏的变化；
+     --e-spring 收尾带一点回弹，只给分段控件的滑块用——它是"跟手"的物理感，
+                不要扩散到卡片和弹层，那里回弹会显得轻浮。 */
   --t-fast: 140ms;
   --t: 190ms;
+  --t-slow: 420ms;
   --ease: cubic-bezier(0.2, 0.7, 0.3, 1);
+  --e-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --e-soft: cubic-bezier(0.4, 0, 0.2, 1);
+  --e-spring: cubic-bezier(0.34, 1.3, 0.64, 1);
 }
 
 * { box-sizing: border-box; }
+
+/* 选中文字用柔和的品牌色，不用系统默认的深蓝块 */
+::selection { background: rgba(47, 127, 209, 0.18); }
 
 /* 焦点：键盘看得见、鼠标不打扰。环由内向外铺开，是"呼吸感"的主要来源。 */
 :where(a, button, input, select, textarea, summary, [tabindex]):focus-visible {
@@ -101,6 +112,12 @@ body {
   position: sticky;
   top: 0;
   z-index: 5;
+  transition: box-shadow var(--t) var(--e-soft), border-color var(--t) var(--e-soft);
+}
+/* 内容从顶栏下面穿过去时给一道投影：不滚动时不画，页面保持"平"。 */
+.topbar.is-scrolled {
+  border-bottom-color: rgba(47, 127, 209, 0.20);
+  box-shadow: 0 8px 24px rgba(20, 35, 60, 0.09);
 }
 @supports (backdrop-filter: blur(8px)) {
   .topbar {
@@ -144,14 +161,18 @@ body {
   cursor: pointer;
 }
 
-/* 导航：胶囊分段控件。当前项是一颗浮起来的白色胶囊，不是一条下划线。 */
+/* 导航：胶囊分段控件。当前项是一颗浮起来的白色胶囊，不是一条下划线。
+   胶囊由 .pill 单独承担并会在切换时滑过去，按钮自己不再画底色。 */
 .nav {
+  position: relative;
   display: flex;
   gap: 4px;
   padding: 10px 24px 0;
   overflow-x: auto;
 }
 .nav button {
+  position: relative;
+  z-index: 1;
   border: 0;
   background: transparent;
   padding: 9px 16px;
@@ -168,9 +189,10 @@ body {
 .nav button[aria-current="page"] {
   color: var(--brand-strong);
   font-weight: 600;
-  background: #fff;
-  box-shadow: var(--shadow-1), inset 0 0 0 1px rgba(47, 127, 209, 0.16);
+  background: transparent;
 }
+/* 选中项的底已由滑块画好，再叠 hover 的浅蓝会变成两块颜色 */
+.nav button[aria-current="page"]:hover { background: transparent; }
 .nav .count {
   display: inline-block;
   min-width: 18px;
@@ -225,8 +247,26 @@ main {
 .card > :last-child { margin-bottom: 0; }
 .card .hint { color: var(--muted); font-size: 13px; margin: 0 0 10px; }
 
+/* 入场：卡片错峰 40ms 上移 10px。只排前 8 张，第 9 张之后同时出现——
+   一页十几张卡还按序排队，用户会先看见空白。 */
+@keyframes card-in {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: none; }
+}
+main .card { animation: card-in var(--t-slow) var(--e-out) backwards; }
+main .card:nth-child(1) { animation-delay: 0ms; }
+main .card:nth-child(2) { animation-delay: 40ms; }
+main .card:nth-child(3) { animation-delay: 80ms; }
+main .card:nth-child(4) { animation-delay: 120ms; }
+main .card:nth-child(5) { animation-delay: 160ms; }
+main .card:nth-child(6) { animation-delay: 200ms; }
+main .card:nth-child(7) { animation-delay: 240ms; }
+main .card:nth-child(8) { animation-delay: 280ms; }
+
 .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
 .row.tight { gap: 6px; }
+/* 周切换：桌面靠右并成一组，窄屏整行三等分（见文件末尾媒体查询） */
+.week-nav { display: flex; gap: 8px; }
 /* 候选筛选：复选框与文字同排，数字框窄一些 */
 label.check { display: inline-flex; gap: 4px; align-items: center; font-size: 13px; }
 label.check input[type='number'] { width: 56px; }
@@ -396,6 +436,17 @@ textarea { width: 100%; min-height: 84px; resize: vertical; }
 .picker-row .picker-tag { font-size: 12px; color: var(--brand); }
 .picker-row .picker-meta { font-size: 12px; color: var(--muted); }
 .picker-empty { margin: 0; padding: 14px 10px; color: var(--muted); font-size: 13px; }
+.picker-row:disabled { opacity: .55; cursor: not-allowed; background: transparent; }
+/* 对调：对方可让出的课次。列表本身可滚动，与选人面板一致，不依赖浏览器弹层 */
+.swap-lessons {
+  display: grid;
+  gap: 2px;
+  margin-top: 8px;
+  max-height: 260px;
+  overflow: auto;
+  padding-right: 2px;
+}
+.swap-lessons .picker-group { padding-left: 2px; }
 
 /* ---------- 登录 ---------- */
 .login-wrap { flex: 1; display: grid; place-items: center; padding: 40px 20px; }
@@ -420,6 +471,24 @@ textarea { width: 100%; min-height: 84px; resize: vertical; }
 .login .msg.error { color: var(--danger); }
 
 /* ---------- 课表 ---------- */
+/* 课表容器：窄屏放不下五列时横向滚动，不压缩格子（压缩会变成逐字竖排）。 */
+.board-scroll {
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(47, 127, 209, 0.28) transparent;
+  padding-bottom: 2px;
+}
+/* 横向滚动条做窄做淡：它是提示"还能往右滑"，不该抢课表的视觉重心 */
+.board-scroll::-webkit-scrollbar { height: 8px; }
+.board-scroll::-webkit-scrollbar-track { background: transparent; }
+.board-scroll::-webkit-scrollbar-thumb {
+  background: rgba(47, 127, 209, 0.22);
+  border-radius: var(--radius-pill);
+}
+.board-scroll::-webkit-scrollbar-thumb:hover { background: rgba(47, 127, 209, 0.38); }
+.board-hint { display: none; margin: 6px 0 0; color: var(--muted); font-size: 12px; text-align: center; }
 /* 格子之间留 8px 空隙，靠空隙分层而不是靠边框，看起来更轻。 */
 .board { width: 100%; border-collapse: separate; border-spacing: 8px; table-layout: fixed; }
 .board th {
@@ -432,10 +501,12 @@ textarea { width: 100%; min-height: 84px; resize: vertical; }
 .board th .date { display: block; font-weight: 400; font-size: 11px; margin-top: 1px; }
 .board .period-head { width: 52px; }
 .board td { vertical-align: top; padding: 0; }
-.board td.is-today {
-  background: rgba(47, 127, 209, 0.05);
-  border-radius: var(--radius);
-}
+/* 每行给一个基准高度：同一行里所有格子（有课/没课）都对同一个高度，不会一个高一个矮。 */
+.board tr { height: 78px; }
+/* 今日列：强调落在格子本身。落在 td 上时，td 的高度=行高、格子只按内容高，
+   空格的底色就会从虚线框下沿露出来——看起来就是"蓝边超出方格"。 */
+.board td.is-today .slot { background: #f4f9ff; border-color: rgba(47, 127, 209, 0.32); }
+.board td.is-today .slot.empty { background: #f8fbff; border-color: rgba(47, 127, 209, 0.20); }
 .board th.is-today { color: var(--brand-strong); }
 .board th.is-today .date { color: var(--brand); font-weight: 600; }
 .board .period {
@@ -449,7 +520,8 @@ textarea { width: 100%; min-height: 84px; resize: vertical; }
   border: 1px solid var(--line);
   border-radius: var(--radius);
   padding: 9px 10px;
-  min-height: 62px;
+  min-height: 78px;
+  height: 100%;
   background: #fff;
   display: flex;
   flex-direction: column;
@@ -468,6 +540,12 @@ textarea { width: 100%; min-height: 84px; resize: vertical; }
   box-shadow: var(--shadow-2);
   transform: translateY(-1px);
 }
+/* 按下去要"陷"一下：手指点在格子上时，抬升消失比什么都不发生更像按到了东西。 */
+button.slot:active {
+  transform: translateY(0) scale(0.985);
+  box-shadow: inset 0 2px 6px rgba(20, 35, 60, 0.08);
+  transition-duration: var(--t-fast);
+}
 .slot.empty {
   cursor: default;
   background: transparent;
@@ -478,7 +556,8 @@ textarea { width: 100%; min-height: 84px; resize: vertical; }
 }
 .slot.empty:hover { border-color: var(--line-strong); transform: none; box-shadow: none; }
 .slot .subject { font-weight: 600; font-size: 13px; }
-.slot .meta { color: var(--muted); font-size: 12px; }
+/* 时间列用等宽数字：08:00 / 09:40 上下对齐，扫视时不用逐行对字符 */
+.slot .meta { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
 .slot .tags { display: flex; gap: 4px; flex-wrap: wrap; margin-top: 2px; }
 .slot.is-unknown { border-left: 3px solid #d19a2a; }
 .slot.is-cancelled { opacity: 0.62; }
@@ -533,6 +612,7 @@ table.data td.mono, .mono { font-family: ui-monospace, "SFMono-Regular", Menlo, 
 
 /* 页签：与导航同一套胶囊分段语言，避免一页里出现两种选择控件风格 */
 .tabs {
+  position: relative;
   display: inline-flex;
   gap: 2px;
   padding: 3px;
@@ -542,6 +622,8 @@ table.data td.mono, .mono { font-family: ui-monospace, "SFMono-Regular", Menlo, 
   flex-wrap: wrap;
 }
 .tabs button {
+  position: relative;
+  z-index: 1;
   font: inherit;
   font-size: 13px;
   padding: 6px 14px;
@@ -555,10 +637,39 @@ table.data td.mono, .mono { font-family: ui-monospace, "SFMono-Regular", Menlo, 
 }
 .tabs button:hover { color: var(--brand-strong); }
 .tabs button[aria-selected="true"] {
-  background: #fff;
+  background: transparent;
   color: var(--brand-strong);
   font-weight: 600;
-  box-shadow: var(--shadow-1), inset 0 0 0 1px rgba(47, 127, 209, 0.14);
+}
+
+/* 滑块本身。位置和尺寸由 JS 量出选中项后写成 CSS 变量，这里只管长相与过渡。
+   为什么不用 translateX(百分比)：导航项和页签的文字长短都不同（"待我确认（3）" vs
+   "新建方案"），按等分算位移必然越走越偏；宽度一起变才对得上。 */
+.pill {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 0;
+  width: var(--pill-w, 0px);
+  height: var(--pill-h, 0px);
+  transform: translate(var(--pill-x, 0px), var(--pill-y, 0px));
+  border-radius: var(--radius-pill);
+  background: #fff;
+  box-shadow: var(--shadow-1), inset 0 0 0 1px rgba(47, 127, 209, 0.16);
+  opacity: 0;
+  pointer-events: none;
+  transition: transform 320ms var(--e-spring), width 320ms var(--e-spring),
+    height 320ms var(--e-spring), opacity var(--t) var(--ease);
+}
+.pill.is-on { opacity: 1; }
+/* 首次定位与跨重建的起点：这一段不要动画，否则一进页面就能看见滑块从最左边滑过来 */
+.pill.is-instant { transition: none; }
+
+/* 滑块画不出来的场合（窄屏换行、还没量到尺寸）：退回"按钮自己带底"，选中态不能没有 */
+.nav.no-pill button[aria-current="page"],
+.tabs.no-pill button[aria-selected="true"] {
+  background: #fff;
+  box-shadow: var(--shadow-1), inset 0 0 0 1px rgba(47, 127, 209, 0.16);
 }
 
 /* 方案卡：可点，所以给悬停抬升；抬升幅度只有 1px，是"应手"不是"跳动" */
@@ -629,21 +740,73 @@ table.data td.mono, .mono { font-family: ui-monospace, "SFMono-Regular", Menlo, 
   main { padding: 12px; }
   .grid-2, .grid-3 { grid-template-columns: 1fr; }
   .board { border-spacing: 4px; }
-  .slot { padding: 7px; min-height: 50px; }
+  .slot { padding: 7px; min-height: 78px; }
   .slot .meta { font-size: 11px; }
   .kv { grid-template-columns: 100px 1fr; }
 }
 
-/* 窄屏（手机）：顶栏换行、页签与按钮可以整行、表格允许横向滚动 */
-@media (max-width: 480px) {
-  .topbar { flex-wrap: wrap; gap: 10px; padding: 12px 14px; }
-  .topbar .who { width: 100%; justify-content: flex-end; }
-  .nav { padding: 8px 14px 0; }
-  main { padding: 10px 12px 4px; }
-  .card { padding: 14px; margin-bottom: 14px; }
+/* 窄屏（手机）：一屏只做一件事，按钮不小于 40px 高；
+   放不下的表格横滑，不靠缩字号硬塞——缩到 45px 宽就会出现逐字竖排。 */
+@media (max-width: 560px) {
+  /* 顶栏：品牌一行、身份一行。原来的 spacer 在换行布局里只会撑出一段空白。 */
+  .topbar { flex-wrap: wrap; gap: 6px 8px; padding: 10px 12px; }
+  .topbar .brand { font-size: 15px; gap: 8px; }
+  .topbar .brand::before { width: 20px; height: 20px; border-radius: 6px; }
+  .topbar .spacer { display: none; }
+  .topbar .who { width: 100%; justify-content: flex-start; gap: 2px; font-size: 12.5px; }
+  .topbar .who > span { padding: 3px 8px; }
+  .topbar .who .btn.ghost { min-height: 36px; padding: 5px 8px; font-size: 13px; }
+
+  /* 导航：整行等分，不再横向溢出把最后一项切掉 */
+  .nav {
+    display: grid;
+    grid-auto-flow: column;
+    grid-auto-columns: minmax(0, 1fr);
+    gap: 2px;
+    padding: 8px 10px 0;
+    overflow: visible;
+  }
+  .nav button { padding: 9px 2px; font-size: 12.5px; text-align: center; }
+  .nav .count { margin-left: 3px; }
+
+  main { padding: 10px 10px 4px; }
+  .card { padding: 14px; margin-bottom: 12px; }
+  /* 长标题自己换行，不把徽标挤成第二行 */
+  .card > .row { gap: 6px 8px; }
+  .card > .row h2, .page-head h2 { font-size: 17px; line-height: 1.4; }
+  .card .hint { font-size: 12.5px; }
+
+  /* 触控目标：高度至少 40px；同一行的按钮等分，不再按文字长短各自为政 */
+  button.btn { min-height: 40px; padding: 8px 12px; font-size: 14px; }
+  button.btn.ghost { padding: 6px 10px; }
+  .row > .btn { flex: 1 1 0; min-width: 0; }
+  .week-bar { gap: 8px; }
+  .week-bar .field { width: 100%; }
+  .week-bar .spacer { display: none; }
+  .week-nav { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; width: 100%; }
+  .week-nav .btn { width: 100%; }
+
+  /* 课表：整表横滑，节次列粘在左边；格子内文字恢复两到三行 */
+  .board { min-width: 520px; }
+  .board th { font-size: 11.5px; }
+  .board th .date { font-size: 10.5px; }
+  .board .period-head,
+  .board td.period {
+    width: 40px;
+    font-size: 11px;
+    position: sticky;
+    left: 0;
+    z-index: 2;
+    background: #fff;
+  }
+  .board td.period { padding-top: 10px; }
+  .slot { padding: 7px 8px; min-height: 78px; gap: 3px; }
+  .slot .subject { font-size: 12.5px; }
+  .slot .meta { font-size: 10.5px; line-height: 1.35; }
+  .board-hint { display: block; }
+
   .tabs { display: flex; width: 100%; }
   .tabs button { flex: 1; text-align: center; }
-  .row > .btn { flex: 1 1 auto; }
   .kv { grid-template-columns: 1fr; gap: 4px 0; }
   .kv dt { margin-top: 6px; }
 }
