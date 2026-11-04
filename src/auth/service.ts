@@ -17,7 +17,7 @@ import {
   hashPassword,
   verifyPassword,
 } from './password.js';
-import { type Action, can } from './policy.js';
+import { ALL_ACTIONS, type Action, can } from './policy.js';
 import { type Principal, type Role, NON_GRANTABLE_ROLES, isRole, mintPrincipal } from './principal.js';
 
 /** 会话空闲超时：技术基线，可由部署方调整；不是学校制度。 */
@@ -240,8 +240,59 @@ export class AuthService {
     });
   }
 
-  disableUser(principal: Principal, userId: string, reason: string): void {
+  /**
+   * 账号级能力授权：单点、可撤销、必须填依据。
+   *
+   * 这不是"加一个角色"：不改 actingRole，也不影响其它能力。
+   * 不能覆盖 TBD_BLOCKED——那表示"校方尚未指定责任人"，不是权限不够。
+   */
+  grantCapability(principal: Principal, userId: string, action: string, basis: string): void {
     this.requireAction(principal, 'MANAGE_ACCOUNTS');
+    if (!(ALL_ACTIONS as readonly string[]).includes(action)) {
+      throw new AuthError('BAD_INPUT', `未知能力：${action}`);
+    }
+    if (basis.trim() === '') throw new AuthError('BAD_INPUT', '授予能力必须登记依据（文件编号或批准人）');
+    if (userId === principal.userId) {
+      throw new AuthError('BAD_INPUT', '不得给自己授予能力：管理员不因技术权限获得业务权');
+    }
+    const user = this.store.findUserById(userId);
+    if (!user) throw new AuthError('USER_NOT_FOUND', '账号不存在');
+    if (user.status === 'DISABLED') throw new AuthError('BAD_INPUT', '账号已停用，先恢复启用再授权');
+
+    const at = this.now();
+    this.db.transaction(() => {
+      this.store.grantCapability({ userId, action, basis: basis.trim(), by: principal.userId, at });
+      this.db.auditLog.append({
+        at,
+        actor: principal.userId,
+        action: 'GRANT_CAPABILITY',
+        objectType: 'USER',
+        objectId: userId,
+        afterState: action,
+        reason: basis.trim(),
+      });
+    });
+  }
+
+  /** 撤销账号级能力：立即作废该账号全部会话，避免旧会话里还带着已撤的授权。 */
+  revokeCapability(principal: Principal, userId: string, action: string): void {
+    this.requireAction(principal, 'MANAGE_ACCOUNTS');
+    const at = this.now();
+    this.db.transaction(() => {
+      this.store.revokeCapability(userId, action, at, principal.userId);
+      this.store.revokeAllSessions(userId, at, 'CAPABILITY_REVOKED');
+      this.db.auditLog.append({
+        at,
+        actor: principal.userId,
+        action: 'REVOKE_CAPABILITY',
+        objectType: 'USER',
+        objectId: userId,
+        beforeState: action,
+      });
+    });
+  }
+
+  disableUser(principal: Principal, userId: string, reason: string): void {    this.requireAction(principal, 'MANAGE_ACCOUNTS');
     if (principal.userId === userId) throw new AuthError('CANNOT_DISABLE_SELF', '不能停用当前登录账号');
     const user = this.store.findUserById(userId);
     if (!user) throw new AuthError('USER_NOT_FOUND', '账号不存在');
@@ -380,6 +431,7 @@ export class AuthService {
       displayName: user.displayName,
       roles,
       actingRole: session.actingRole,
+      grants: this.store.capabilitiesOf(user.id),
       sessionId: session.id,
       mustChangePassword: user.mustChangePassword,
     });
@@ -526,6 +578,7 @@ export class AuthService {
         displayName: user.displayName,
         roles,
         actingRole,
+        grants: this.store.capabilitiesOf(user.id),
         sessionId,
         mustChangePassword: user.mustChangePassword,
       }),

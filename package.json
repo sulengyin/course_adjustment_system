@@ -15,6 +15,7 @@
     "demo:p3": "tsx scripts/demo-p3.ts",
     "init-admin": "tsx scripts/init-admin.ts",
     "serve": "tsx scripts/serve.ts",
+    "serve:auto": "bash scripts/serve-auto.sh",
     "backup": "tsx scripts/backup.ts",
     "restore": "tsx scripts/restore.ts",
     "smoke:deploy": "bash scripts/smoke-deploy.sh",
@@ -27,7 +28,8 @@
     "import-timetable": "tsx scripts/import-timetable.ts",
     "reset-password": "tsx scripts/reset-password.ts",
     "grant-role": "tsx scripts/grant-role.ts",
-    "set-mode": "tsx scripts/set-mode.ts"
+    "set-mode": "tsx scripts/set-mode.ts",
+    "grant-capability": "tsx scripts/grant-capability.ts"
   },
   "devDependencies": {
     "@types/node": "^26.6.6",

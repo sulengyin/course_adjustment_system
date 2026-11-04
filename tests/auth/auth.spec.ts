@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { CourseDatabase } from '../../src/store/database.js';
 import { AuthService, PolicyDeniedError } from '../../src/auth/service.js';
 import type { Principal } from '../../src/auth/principal.js';
+import { can } from '../../src/auth/policy.js';
+import { mintPrincipal } from '../../src/auth/principal.js';
 import { checkPasswordStrength, generateInitialPassword } from '../../src/auth/password.js';
 
 const KNOWN = 'Passw0rd!2026x';
@@ -379,5 +381,76 @@ describe('一人多角色与身份切换', () => {
     expect(() => h.auth.requireAction(asAdmin.principal, 'IMPORT_TIMETABLE')).toThrow(/无权执行/);
     expect(() => h.auth.requireAction(asStaff.principal, 'IMPORT_TIMETABLE')).not.toThrow();
     expect(() => h.auth.requireAction(asStaff.principal, 'MANAGE_ACCOUNTS')).toThrow(/无权执行/);
+  });
+});
+
+describe('账号级能力授权（不是加角色）', () => {
+  function userIdOf(h: Harness, loginName: string): string {
+    const row = h.db.handle.prepare('SELECT id FROM app_user WHERE login_name = ?').get(loginName) as
+      | { id: string }
+      | undefined;
+    if (!row) throw new Error(`账号不存在：${loginName}`);
+    return row.id;
+  }
+
+  it('默认没有代发起能力；授予后要重新登录才生效', () => {
+    const h = harness();
+    seedTeacher(h.db, 'T1', '甲');
+    const first = addUser(h, { loginName: 't001', roles: ['T'], teacherId: 'T1' });
+    expect(can(first, 'CREATE_CHANGE_ON_BEHALF').allowed).toBe(false);
+
+    h.auth.grantCapability(h.admin, userIdOf(h, 't001'), 'CREATE_CHANGE_ON_BEHALF', '校务会 2026-11 决议');
+    // 旧会话里没有这份授权，必须重新登录——避免"授了但旧页面已经在用"
+    expect(can(first, 'CREATE_CHANGE_ON_BEHALF').allowed).toBe(false);
+
+    const again = h.auth.login('t001', KNOWN, 'T');
+    if (!again.ok) throw new Error(`relogin failed: ${again.code}`);
+    expect(can(again.principal, 'CREATE_CHANGE_ON_BEHALF').allowed).toBe(true);
+    // 角色没有变过
+    expect(again.principal.roles).toEqual(['T']);
+  });
+
+  it('个人授权不能把"校方尚未指定责任人"变成可用', () => {
+    // PUBLISH_TIMETABLE 对 S 是 TBD_BLOCKED（发布岗位未证实）。
+    // 即便把这条能力写进 grants，也必须仍是 ROLE_NOT_ASSIGNED：
+    // 制度未定不是权限不够，不能用个人授权绕过去。
+    const s = mintPrincipal({
+      userId: 'U-s01',
+      teacherId: null,
+      displayName: '课务',
+      roles: ['S'],
+      actingRole: 'S',
+      grants: ['PUBLISH_TIMETABLE'],
+      sessionId: 'S-s01',
+      mustChangePassword: false,
+    });
+    expect(can(s, 'PUBLISH_TIMETABLE').code).toBe('ROLE_NOT_ASSIGNED');
+  });
+
+  it('必须写依据，管理员不能授给自己', () => {
+    const h = harness();
+    seedTeacher(h.db, 'T1', '甲');
+    addUser(h, { loginName: 't001', roles: ['T'], teacherId: 'T1' });
+    const target = userIdOf(h, 't001');
+
+    expect(() => h.auth.grantCapability(h.admin, target, 'CREATE_CHANGE_ON_BEHALF', '   ')).toThrow(/依据/);
+    expect(() => h.auth.grantCapability(h.admin, h.admin.userId, 'CREATE_CHANGE_ON_BEHALF', '自己批自己')).toThrow(
+      /给自己/,
+    );
+    expect(() => h.auth.grantCapability(h.admin, target, 'NOT_A_REAL_ACTION', 'x')).toThrow(/未知能力/);
+  });
+
+  it('撤销后立即作废该账号的所有会话', () => {
+    const h = harness();
+    seedTeacher(h.db, 'T1', '甲');
+    addUser(h, { loginName: 't001', roles: ['T'], teacherId: 'T1' });
+    const target = userIdOf(h, 't001');
+    h.auth.grantCapability(h.admin, target, 'CREATE_CHANGE_ON_BEHALF', '校务会 2026-11 决议');
+
+    const again = h.auth.login('t001', KNOWN, 'T');
+    if (!again.ok) throw new Error('relogin failed');
+
+    h.auth.revokeCapability(h.admin, target, 'CREATE_CHANGE_ON_BEHALF');
+    expect(h.auth.authenticate(again.token)).toBeNull();
   });
 });

@@ -1,5 +1,5 @@
 /**
- * P7I 调课候选筛选偏好：全校由课务管理人员默认值（CHANGE_L1_CONFIG），教师可覆盖自己的。
+ * P7I 代课候选筛选偏好：全校由课务管理人员默认值（CHANGE_L1_CONFIG），教师可覆盖自己的。
  *
  * 边界（不开放）：
  *   - 偏好只影响"给发起人看的排序与显示"，不进入确认集合计算，也不改变冲突判定。
@@ -163,7 +163,7 @@ export class ChangePreferenceService {
     return { preference: NEUTRAL_PREFERENCE, source: 'NEUTRAL', school: null, mine: null };
   }
 
-  /** 生效偏好的扁平形式：发起调课时界面不带筛选条件，就用这一套。 */
+  /** 生效偏好的扁平形式：发起代课时界面不带筛选条件，就用这一套。 */
   effectiveInput(teacherId: string | null): PreferenceInput {
     return preferenceToInput(this.effective(teacherId).preference);
   }

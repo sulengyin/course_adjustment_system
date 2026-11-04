@@ -591,3 +591,109 @@ describe('幂等键边界', () => {
     expect(stored.idempotency_key).toBeNull();
   });
 });
+
+describe('代他人发起调课', () => {
+  function operator(teacherId: string, grants: string[]): Principal {
+    return mintPrincipal({
+      userId: `U-${teacherId}`,
+      teacherId,
+      displayName: teacherId,
+      roles: ['T'],
+      actingRole: 'T',
+      grants,
+      sessionId: `S-${teacherId}`,
+      mustChangePassword: false,
+    });
+  }
+
+  function cancelOf(occurrenceId: string) {
+    return { occurrenceId, kind: 'CANCEL' as const, toTeacherId: null, toDate: null, toPeriod: null };
+  }
+
+  it('没有该能力时，即使传了 onBehalfOf 也一律拒绝', () => {
+    const occ = pickOccurrence();
+    const someone = otherTeachers(2).find((t) => t !== occ.teacherId);
+    if (!someone) throw new Error('样本里没有第二位教师');
+
+    expect(() =>
+      changes.submitNew({
+        termId: TERM,
+        principal: operator(someone, []),
+        items: [cancelOf(occ.occurrenceId)],
+        reason: null,
+        idempotencyKey: key(),
+        onBehalfOfTeacherId: occ.teacherId,
+      }),
+    ).toThrow();
+  });
+
+  it('具备能力时：方案记在被代教师名下，created_by 记代办人', () => {
+    const occ = pickOccurrence();
+    const someone = otherTeachers(2).find((t) => t !== occ.teacherId);
+    if (!someone) throw new Error('样本里没有第二位教师');
+    const token = key();
+
+    const summary = changes.submitNew({
+      termId: TERM,
+      principal: operator(someone, ['CREATE_CHANGE_ON_BEHALF']),
+      items: [cancelOf(occ.occurrenceId)],
+      reason: null,
+      idempotencyKey: token,
+      onBehalfOfTeacherId: occ.teacherId,
+    });
+    expect(summary.caseId).not.toBeNull();
+
+    const row = db.handle
+      .prepare('SELECT submitted_by, created_by FROM change_case WHERE id = ?')
+      .get(String(summary.caseId)) as { submitted_by: string; created_by: string | null };
+    // 业务归属仍是被代教师；代办人只作为"实际操作人"留痕
+    expect(row.submitted_by).toBe(occ.teacherId);
+    expect(row.created_by).toBe(someone);
+
+    // 幂等重放：同一键再提交，返回原方案而不是建第二笔
+    const replay = changes.submitNew({
+      termId: TERM,
+      principal: operator(someone, ['CREATE_CHANGE_ON_BEHALF']),
+      items: [cancelOf(occ.occurrenceId)],
+      reason: null,
+      idempotencyKey: token,
+      onBehalfOfTeacherId: occ.teacherId,
+    });
+    expect(replay.code).toBe('DUPLICATE_REPLAY');
+    expect(replay.caseId).toBe(summary.caseId);
+  });
+
+  it('被代教师与课次归属对不上时拒绝', () => {
+    const list = otherTeachers(2);
+    const victim = list[0];
+    const another = list[1];
+    if (!victim || !another) throw new Error('样本中教师不足');
+    const occ = active().find((a) => a.teacherId === victim);
+    if (!occ) throw new Error('找不到该教师的课次');
+
+    expect(() =>
+      changes.submitNew({
+        termId: TERM,
+        principal: operator(victim, ['CREATE_CHANGE_ON_BEHALF']),
+        items: [cancelOf(occ.occurrenceId)],
+        reason: null,
+        idempotencyKey: key(),
+        onBehalfOfTeacherId: another,
+      }),
+    ).toThrow();
+  });
+
+  it('不能以"代发起"的名义给自己建单', () => {
+    const occ = pickOccurrence();
+    expect(() =>
+      changes.submitNew({
+        termId: TERM,
+        principal: operator(occ.teacherId, ['CREATE_CHANGE_ON_BEHALF']),
+        items: [cancelOf(occ.occurrenceId)],
+        reason: null,
+        idempotencyKey: key(),
+        onBehalfOfTeacherId: occ.teacherId,
+      }),
+    ).toThrow();
+  });
+});

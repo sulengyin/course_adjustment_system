@@ -1,5 +1,5 @@
 /**
- * P7H/P7I 调课对象候选推荐：纯函数，不依赖数据库、HTTP、权限。
+ * P7H/P7I 代课对象候选推荐：纯函数，不依赖数据库、HTTP、权限。
  *
  * 定位（重要）：
  *   推荐只回答"谁更可能接得下这节课"，不回答"谁必须接"。
@@ -87,6 +87,11 @@ export interface CandidateInput {
   readonly targetPeriod?: number;
   /** 目标日期当天，该班该科目已有节数（含本课次）；用于"一天两节同科"提示 */
   readonly classSubjectDayCount?: number;
+  /**
+   * 本学期任教语文或数学的教师。用于"接手后当天只剩上午第4节"的提示。
+   * 由服务层按科目名判定后传入：领域层不认科目 ID，也不把"哪两科"写死在这里。
+   */
+  readonly languageMathTeacherIds?: readonly string[];
   readonly preference: CandidatePreference;
 }
 
@@ -127,7 +132,7 @@ export interface CandidateRanking {
  */
 const W_SAME_CLASS = 60;
 const W_SAME_GRADE = 30;
-/** 档位内加分·学科对口：调课不是代课，跨学科不应被重罚，因此只给低固定值 */
+/** 档位内加分·学科对口：代课不要求同科，跨学科不应被重罚，因此只给低固定值 */
 const W_SUBJECT = 10;
 /** 档位内加分·当天课程密度：0 节给满 +8，8 节及以上为 0 */
 const W_LOAD_MAX = 8;
@@ -139,10 +144,13 @@ const TIER_ORDER: Readonly<Record<CandidateTier, number>> = {
   CROSS_GRADE: 2,
 };
 
-/** 接手该节后的最长连续节数。只看教师本人连堂，班级连堂不在判定范围。 */
-function longestRun(periods: readonly number[], target: number): number {
+/**
+ * 最长连续上课节数。只看教师本人连堂，班级连堂不在判定范围。
+ * `target` 用于"接手某一节之后"：把该节并入课表再算；不传则按给定节次直接算。
+ */
+export function longestRun(periods: readonly number[], target?: number): number {
   const set = new Set<number>(periods);
-  set.add(target);
+  if (target !== undefined) set.add(target);
   let best = 0;
   let current = 0;
   // 节次从 1 起，上限取当天最大节次与 20 的较大值，避免漏判
@@ -164,6 +172,7 @@ export function rankCandidates(input: CandidateInput): CandidateRanking {
   const busy = new Set(input.busyAtSlot);
   const targetPeriod = input.targetPeriod ?? occurrence.period;
   const classSubjectDayCount = input.classSubjectDayCount ?? 0;
+  const languageMath = new Set(input.languageMathTeacherIds ?? []);
 
   const subjectByTeacher = new Set<string>();
   const classByTeacher = new Set<string>();
@@ -226,7 +235,7 @@ export function rankCandidates(input: CandidateInput): CandidateRanking {
     else if (inSameGrade) reasons.push(`本学期任教同年级（${grade ?? '未知年级'}）其他班`);
     if (teachesSubject) reasons.push('本学期任教同一科目');
     if (freeAtSlot) reasons.push('该节次本人无课');
-    else reasons.push('该节次本人有课，需先与对方对调');
+    else reasons.push('该节次本人有课，需先解决该时段冲突');
     reasons.push(dayCount === 0 ? '当天没有排课' : `当天已排 ${dayCount} 节`);
     if (runAfter >= 3) reasons.push(`接手后将连续上 ${runAfter} 节`);
 
@@ -236,6 +245,11 @@ export function rankCandidates(input: CandidateInput): CandidateRanking {
       classSubjectDayCount >= preference.hint.classSubjectDayLimit
     ) {
       hints.push(`该班当天该科目共 ${classSubjectDayCount} 节`);
+    }
+    // 语数教师当天原本没课，接手的又正好是上午第4节：整天的课就只剩这一节，
+    // 等于要为他专程跑一趟学校，被拒的可能性明显更高。只提示，不改变排序与可选性。
+    if (languageMath.has(teacher.id) && dayCount === 0 && targetPeriod === 4) {
+      hints.push('接手后当天只有上午第4节这一节，可能需专程到校');
     }
 
     kept.push({
@@ -253,7 +267,7 @@ export function rankCandidates(input: CandidateInput): CandidateRanking {
   }
 
   kept.sort((a, b) => {
-    // 可行性先于一切：能直接接下的排在"需要先对调"的前面
+    // 可行性先于一切：能直接接下的排在"需要先解决冲突"的前面
     if (a.freeAtSlot !== b.freeAtSlot) return a.freeAtSlot ? -1 : 1;
     // 档位是主排序键：同班 > 同年级 > 跨年级，学科与课密度只在档位内部起作用
     if (TIER_ORDER[a.tier] !== TIER_ORDER[b.tier]) {
@@ -264,6 +278,132 @@ export function rankCandidates(input: CandidateInput): CandidateRanking {
   });
 
   return { candidates: kept, excluded };
+}
+
+/**
+ * 单节课的时长（分钟）。缺起止时间、或起止时间不合法时返回 null（无法判定）。
+ *
+ * 为什么对调要卡时长：对调是两节课"整段互换"，双方各让出一节、各接手一节。
+ * 第 4 节只有 20 分钟（11:20–11:40），其余 40 分钟，第 7 节 35 分钟。
+ * 拿 40 分钟的课去换 20 分钟的课，等于凭空从一方手里拿走 20 分钟课时，
+ * 两边的课时总量都对不上，不是"换课"而是"减课"。所以时长不等一律不可对调。
+ */
+export function lessonMinutes(
+  startsAt: string | null,
+  endsAt: string | null,
+): number | null {
+  const from = clockMinutes(startsAt);
+  const to = clockMinutes(endsAt);
+  if (from === null || to === null) return null;
+  const minutes = to - from;
+  return minutes > 0 ? minutes : null;
+}
+
+/** 'HH:MM' → 当天第几分钟；格式不对或越界返回 null。 */
+function clockMinutes(value: string | null): number | null {
+  if (!value) return null;
+  const m = /^(\d{1,2}):(\d{2})$/.exec(value);
+  if (!m) return null;
+  const hour = Number(m[1]);
+  const minute = Number(m[2]);
+  if (hour > 23 || minute > 59) return null;
+  return hour * 60 + minute;
+}
+
+/**
+ * 对调场景的提示：对方让出自己一节课之后，当天还剩几节。
+ *
+ * 只对语数教师生效（口径见 docs/13 §7.7）：语文、数学教师课时密集，
+ * 对调后当天被削成"只剩上午第4节"或"一节不剩"时，对方要么专程跑一趟，
+ * 要么整天白来，被拒的可能性明显更高。
+ *
+ * 只提示，不排除：这是对"对方会不会答应"的推测，不是排课事实。
+ */
+export function swapHints(input: {
+  readonly isLanguageMath: boolean;
+  readonly remainingPeriods: readonly number[];
+}): readonly string[] {
+  if (!input.isLanguageMath) return [];
+  const remain = [...new Set(input.remainingPeriods)];
+  if (remain.length === 0) return ['对调后该教师当天没有课'];
+  if (remain.length === 1 && remain[0] === 4) {
+    return ['对调后该教师当天只有上午第4节这一节，可能需专程到校'];
+  }
+  return [];
+}
+
+/**
+ * 对调时，对方在**我这一天**的课表：原本的课，减去让出的那一节（若同一天），加上接手我的这一节。
+ *
+ * 与代课不同，对调会让对方"既多一节又少一节"，所以不能用"原课数 + 1"近似，
+ * 否则同一天换课会被误判成超量或连堂。
+ */
+export function swapDayAfter(input: {
+  readonly myDate: string;
+  readonly myPeriod: number;
+  readonly lessonDate: string;
+  readonly lessonPeriod: number;
+  readonly theirPeriodsOnMyDate: readonly number[];
+}): number[] {
+  const periods = new Set(input.theirPeriodsOnMyDate);
+  if (input.lessonDate === input.myDate) periods.delete(input.lessonPeriod);
+  periods.add(input.myPeriod);
+  return [...periods].sort((a, b) => a - b);
+}
+
+export interface SwapOptionEvaluation {
+  readonly dayCountAfter: number;
+  readonly longestRunAfter: number;
+  /** 偏好排除原因；非空表示这次对调按当前口径不该推荐 */
+  readonly excludedBy: readonly string[];
+  /** 仅用于同一档位内排序，不代表能力评价 */
+  readonly score: number;
+  readonly reasons: readonly string[];
+}
+
+/**
+ * 评价"对方让出某一节课、接手我这一节课"在偏好口径下是否可行。
+ *
+ * 与代课共用同一套维度，但有两处必须区别对待：
+ *   - `busyAtSlot` 不适用：对方在我这一节有课，恰恰可能就是要换的那一节；
+ *   - 当天课数与连堂按 `swapDayAfter` 实算，不能按 +1 近似。
+ */
+export function evaluateSwapOption(input: {
+  readonly isSameClass: boolean;
+  readonly teachesSubject: boolean;
+  readonly myDate: string;
+  readonly myPeriod: number;
+  readonly lessonDate: string;
+  readonly lessonPeriod: number;
+  readonly theirPeriodsOnMyDate: readonly number[];
+  readonly preference: CandidatePreference;
+}): SwapOptionEvaluation {
+  const after = swapDayAfter(input);
+  const dayCountAfter = after.length;
+  const run = longestRun(after);
+
+  const excludedBy: string[] = [];
+  const limit = input.preference.exclude.consecutiveLimit;
+  if (input.preference.exclude.consecutive && run >= limit) {
+    excludedBy.push(`接手后连续上 ${run} 节，达到 ${limit} 节上限`);
+  }
+  if (input.preference.exclude.dayTotal && dayCountAfter > input.preference.exclude.dayTotalLimit) {
+    excludedBy.push(
+      `接手后当天 ${dayCountAfter} 节，超过 ${input.preference.exclude.dayTotalLimit} 节上限`,
+    );
+  }
+
+  let score = input.isSameClass ? W_SAME_CLASS : 0;
+  if (input.preference.consider.sameSubject && input.teachesSubject) score += W_SUBJECT;
+  if (input.preference.consider.lightLoad) score += Math.max(0, W_LOAD_MAX - dayCountAfter);
+
+  const reasons: string[] = [];
+  if (input.isSameClass) reasons.push('本学期任教该班');
+  if (input.teachesSubject) reasons.push('本学期任教同一科目');
+  reasons.push(dayCountAfter === 1 ? '对调后当天只有 1 节' : `对调后当天 ${dayCountAfter} 节`);
+  if (run >= 2) reasons.push(`对调后连续上 ${run} 节`);
+
+  return { dayCountAfter, longestRunAfter: run, excludedBy, score, reasons };
 }
 
 /** 中性默认：全部维度参与排序，但不隐藏任何教师。系统不替学校把口径写死。 */

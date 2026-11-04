@@ -37,6 +37,11 @@ export interface SubmitInput {
   readonly principal: Principal;
   readonly items: readonly ChangeItem[];
   readonly reason: string | null;
+  /**
+   * 代他人发起时填被代教师的 ID；本人发起留空。
+   * 必须同时具备账号级能力 CREATE_CHANGE_ON_BEHALF，否则一律拒绝。
+   */
+  readonly onBehalfOfTeacherId?: string | null;
   /** 幂等键：HTTP 层要求非空；服务层把空串按"未提供"存 NULL，避免撞 UNIQUE 约束。 */
   readonly idempotencyKey: string;
   readonly classHeadByClass?: Readonly<Record<string, string>>;
@@ -238,20 +243,63 @@ export class ChangeService {
     principal: Principal,
     items: readonly ChangeItem[],
     before: readonly ActiveAssignment[],
+    /**
+     * 谁必须在这笔方案里"被改变"。本人发起时就是自己；
+     * 代发起时是被代教师——受影响的仍是那个人，不是代办人。
+     */
+    ownerOverride?: string,
   ): void {
-    const teacherId = this.requireTeacher(principal);
+    const teacherId = ownerOverride ?? this.requireTeacher(principal);
     const byId = new Map(before.map((a) => [a.occurrenceId, a]));
     const mine = items.some((item) => byId.get(item.occurrenceId)?.teacherId === teacherId);
-    if (!mine) throw new PolicyDeniedError('FORBIDDEN', 'CREATE_OWN_CHANGE');
+    if (!mine) {
+      throw new PolicyDeniedError(
+        'FORBIDDEN',
+        ownerOverride === undefined ? 'CREATE_OWN_CHANGE' : 'CREATE_CHANGE_ON_BEHALF',
+      );
+    }
+  }
+
+  /**
+   * 决定这笔方案"算谁的"。
+   *
+   * 本人发起：必须 CREATE_OWN_CHANGE，方案记在自己名下。
+   * 代他人发起：必须持有账号级能力 CREATE_CHANGE_ON_BEHALF，方案记在被代教师名下，
+   *   另记 createdBy=实际操作的代办人。系统不会因此替被代教师确认——
+   *   必要确认者仍按课次计算，本人不确认就不生效。
+   */
+  private resolveInitiator(input: SubmitInput): { readonly initiator: string; readonly actor: string | null } {
+    const onBehalfOf = input.onBehalfOfTeacherId?.trim() ?? '';
+    if (onBehalfOf === '') {
+      this.assertCan(input.principal, 'CREATE_OWN_CHANGE');
+      return { initiator: this.requireTeacher(input.principal), actor: null };
+    }
+
+    if (input.principal.mustChangePassword) {
+      throw new PolicyDeniedError('FORBIDDEN', 'CREATE_CHANGE_ON_BEHALF');
+    }
+    const decision = can(input.principal, 'CREATE_CHANGE_ON_BEHALF');
+    if (!decision.allowed) {
+      throw new PolicyDeniedError(
+        decision.code === 'ROLE_NOT_ASSIGNED' ? 'ROLE_NOT_ASSIGNED' : 'FORBIDDEN',
+        'CREATE_CHANGE_ON_BEHALF',
+      );
+    }
+    const actor = this.requireTeacher(input.principal);
+    if (actor === onBehalfOf) {
+      throw new PolicyDeniedError('FORBIDDEN', 'CREATE_CHANGE_ON_BEHALF');
+    }
+    return { initiator: onBehalfOf, actor };
   }
 
   /** 创建草稿并立即提交；同一幂等键重复调用返回首次结果，不产生第二个方案。 */
   submitNew(input: SubmitInput): ChangeSummary {
-    this.assertCan(input.principal, 'CREATE_OWN_CHANGE');
+    const initiator = this.resolveInitiator(input);
+    const operator = initiator.actor ?? initiator.initiator;
     const existing = this.store.findByKey(input.idempotencyKey.trim());
     if (existing) {
-      // 幂等键属于发起人；别人拿同一个键不能读到该方案。
-      if (existing.submittedBy !== this.requireTeacher(input.principal)) {
+      // 幂等键属于实际操作人；代发起时，键归代办人，不归被代教师。
+      if ((existing.createdBy ?? existing.submittedBy) !== operator) {
         return emptySummary('NOT_OWNER', existing.id);
       }
       const items = this.store.itemsOf(existing.id, existing.revision);
@@ -281,14 +329,14 @@ export class ChangeService {
   }
 
   createDraft(input: SubmitInput): ChangeSummary {
-    this.assertCan(input.principal, 'CREATE_OWN_CHANGE');
+    const initiator = this.resolveInitiator(input);
     if (input.items.length === 0) return emptySummary('NO_ITEMS', null);
 
     const at = this.now();
     const caseId = this.newId();
     const before = this.store.activeAssignments(input.termId);
-    this.assertOwnsAffected(input.principal, input.items, before);
-    const submittedBy = this.requireTeacher(input.principal);
+    this.assertOwnsAffected(input.principal, input.items, before, initiator.initiator);
+    const submittedBy = initiator.initiator;
     const projection = projectChange(
       before.map(toAssignment),
       input.items,
@@ -304,6 +352,7 @@ export class ChangeService {
         status: 'DRAFT',
         revision: 1,
         submittedBy,
+        createdBy: initiator.actor,
         reason: input.reason,
         idempotencyKey: normalizeKey(input.idempotencyKey),
         createdAt: at,
@@ -324,14 +373,15 @@ export class ChangeService {
       );
       this.store.insertAudit({
         at,
-        actor: submittedBy,
-        action: 'CREATE_DRAFT',
+        actor: initiator.actor ?? submittedBy,
+        action: initiator.actor === null ? 'CREATE_DRAFT' : 'CREATE_ON_BEHALF',
         objectType: 'CHANGE_CASE',
         objectId: caseId,
         beforeState: null,
         afterState: 'DRAFT',
         // 私人理由不进审计链：它属于师生个人材料，审计可见范围更大。
-        reason: input.reason === null ? null : 'REASON_PROVIDED',
+        // 代发起只留"替谁发起"这一事实，不复制理由内容。
+        reason: initiator.actor === null ? (input.reason === null ? null : 'REASON_PROVIDED') : `ON_BEHALF_OF:${submittedBy}`,
       });
     });
 
@@ -373,7 +423,7 @@ export class ChangeService {
         this.store.updateStatus(changeId, 'BLOCKED_CONFLICT', at);
         this.store.insertAudit({
           at,
-          actor: record.submittedBy,
+          actor: record.createdBy ?? record.submittedBy,
           action: 'BLOCK',
           objectType: 'CHANGE_CASE',
           objectId: changeId,
@@ -923,6 +973,7 @@ export class ChangeService {
         status: 'DRAFT',
         revision: 1,
         submittedBy,
+        createdBy: null,
         reason: input.reason,
         idempotencyKey: normalizeKey(input.idempotencyKey),
         createdAt: at,

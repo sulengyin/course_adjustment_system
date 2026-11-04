@@ -34,7 +34,7 @@ beforeEach(() => {
 
 afterEach(() => db.close());
 
-describe('调课候选筛选偏好', () => {
+describe('代课候选筛选偏好', () => {
   it('没有配置时用中性默认：全部考虑、不隐藏任何人', () => {
     const effective = service.effective('T-1');
     expect(effective.source).toBe('NEUTRAL');

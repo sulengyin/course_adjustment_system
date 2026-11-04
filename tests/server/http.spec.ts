@@ -80,6 +80,8 @@ beforeAll(async () => {
       changes,
       timetable,
       emergency,
+      // 固定"今天"：推荐接口会过滤已过去的课次，用真实时钟会让用例在学期结束后变红
+      now: () => new Date(2026, 7, 30, 12, 0, 0).toISOString(),
       logger: createLogger({ sink: (line) => logLines.push(line), now: () => '2026-11-01T00:00:00.000Z' }),
     },
   );
@@ -282,6 +284,30 @@ describe('HTTP 身份边界', () => {
     expect(r.body.code).toBe('BAD_INPUT');
   });
 
+  it('代发起的 onBehalfOfTeacherId 只接受非空字符串', async () => {
+    const token = await loginThroughHttp('teacher01', TEACHER_PW, 'T');
+    const before = changes.activeAssignments(TERM).length;
+    let n = 0;
+    for (const value of ['', '   ', 42, {}, [], true]) {
+      n += 1;
+      const r = await call('/api/changes', {
+        method: 'POST',
+        token,
+        body: {
+          termId: TERM,
+          items: [{ occurrenceId: 'X', kind: 'CANCEL' }],
+          reason: null,
+          idempotencyKey: `BEHALF-BAD-${n}`,
+          onBehalfOfTeacherId: value,
+        },
+      });
+      expect(r.status, JSON.stringify(value)).toBe(400);
+      expect(r.body.code).toBe('BAD_INPUT');
+    }
+    // 输入非法时不能留下半笔方案
+    expect(changes.activeAssignments(TERM).length).toBe(before);
+  });
+
   it('确认决定只接受 ACCEPT / DECLINE，其他取值一律 400', async () => {
     const token = await loginThroughHttp('teacher01', TEACHER_PW, 'T');
     for (const decision of ['accept', 'MAYBE', '', null, 1, true]) {
@@ -431,7 +457,7 @@ describe('身份切换接口', () => {
   });
 });
 
-describe('调课候选接口', () => {
+describe('代课候选接口', () => {
   async function teacherToken(): Promise<string> {
     return loginThroughHttp('teacher01', TEACHER_PW);
   }
@@ -467,6 +493,82 @@ describe('调课候选接口', () => {
     expect(notFound.body.code).toBe('OCCURRENCE_NOT_FOUND');
   });
 
+  it('对调：给出对方可让出的课次，并算清对调后对方当天还剩几节', async () => {
+    const token = await teacherToken();
+    const mine = await call(`/api/timetable/me?termId=${TERM}&from=${FROM}&to=${FROM}`, { token });
+    const rows = (mine.body.view as { rows: Array<{ occurrenceId: string; cancelled: boolean }> }).rows.filter(
+      (r) => !r.cancelled,
+    );
+    const occurrenceId = rows[0]?.occurrenceId;
+    expect(occurrenceId).toBeTruthy();
+
+    const r = await call(
+      `/api/changes/swap-options?termId=${TERM}&occurrenceId=${occurrenceId}&teacherId=T02`,
+      { token },
+    );
+    expect(r.status).toBe(200);
+    expect(r.body.ok).toBe(true);
+    expect((r.body.counterpart as { teacherId: string }).teacherId).toBe('T02');
+    const options = r.body.options as Array<{
+      occurrenceId: string;
+      remainingCount: number;
+      hints: string[];
+      blockedReasons: string[];
+    }>;
+    expect(options.length).toBeGreaterThan(0);
+    for (const option of options) {
+      expect(option.occurrenceId).not.toBe(occurrenceId);
+      expect(Number.isInteger(option.remainingCount)).toBe(true);
+      expect(Array.isArray(option.hints)).toBe(true);
+      expect(Array.isArray(option.blockedReasons)).toBe(true);
+    }
+
+    const missing = await call(`/api/changes/swap-options?termId=${TERM}&occurrenceId=${occurrenceId}`, {
+      token,
+    });
+    expect(missing.status).toBe(400);
+  });
+
+  it('对调推荐：只推荐同班教师，并在每一行给出具体日期与节次', async () => {
+    const token = await teacherToken();
+    const mine = await call(`/api/timetable/me?termId=${TERM}&from=${FROM}&to=${FROM}`, { token });
+    const occurrenceId = (
+      mine.body.view as { rows: Array<{ occurrenceId: string; cancelled: boolean }> }
+    ).rows.filter((r) => !r.cancelled)[0]?.occurrenceId;
+    expect(occurrenceId).toBeTruthy();
+
+    const r = await call(
+      `/api/changes/swap-candidates?termId=${TERM}&occurrenceId=${occurrenceId}`,
+      { token },
+    );
+    expect(r.status).toBe(200);
+    expect(r.body.ok).toBe(true);
+
+    const recommended = r.body.recommended as Array<{
+      tier: string;
+      viableCount: number;
+      reasons: string[];
+      sampleOptions: Array<{ date: string; period: number; blockedReasons: string[] }>;
+    }>;
+    const notRecommended = r.body.notRecommended as Array<{ reasons: string[] }>;
+
+    expect(recommended.length).toBeGreaterThan(0);
+    for (const c of recommended) {
+      expect(c.tier).toBe('SAME_CLASS');
+      expect(c.viableCount).toBeGreaterThan(0);
+      expect(c.sampleOptions.length).toBeGreaterThan(0);
+      expect(c.sampleOptions[0]?.date).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+      expect(c.sampleOptions[0]?.period).toBeGreaterThan(0);
+      expect(c.sampleOptions[0]?.blockedReasons).toEqual([]);
+    }
+    // 不推荐的教师必须逐个说明理由，且没有人在名单里消失
+    expect(recommended.length + notRecommended.length).toBe(db.refs().teachers.length - 1);
+    for (const c of notRecommended) expect(c.reasons.length).toBeGreaterThan(0);
+
+    const missing = await call(`/api/changes/swap-candidates?termId=${TERM}`, { token });
+    expect(missing.status).toBe(400);
+  });
+
   it('他人的课次不给候选名单', async () => {
     const token = await teacherToken();
     const mine = await call(`/api/timetable/me?termId=${TERM}&from=${FROM}&to=${TO}`, { token });
@@ -483,7 +585,7 @@ describe('调课候选接口', () => {
   });
 });
 
-describe('调课候选筛选偏好接口', () => {
+describe('代课候选筛选偏好接口', () => {
   const PREF = {
     considerSameClass: true,
     considerSameGrade: true,

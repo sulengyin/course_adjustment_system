@@ -120,8 +120,10 @@ CREATE TABLE IF NOT EXISTS occurrence (
   data_origin    TEXT NOT NULL CHECK (data_origin IN ('SIMULATED','IMPORTED_UNVERIFIED','OFFICIAL'))
 );
 
-CREATE INDEX IF NOT EXISTS idx_occ_teacher ON occurrence(term_id, teacher_id, date);
-CREATE INDEX IF NOT EXISTS idx_occ_class   ON occurrence(term_id, class_id, date);
+CREATE INDEX IF NOT EXISTS idx_occ_teacher   ON occurrence(term_id, teacher_id, date);
+CREATE INDEX IF NOT EXISTS idx_occ_class     ON occurrence(term_id, class_id, date);
+-- 按日期取整段课表（如"某一天全校"）走这条；没有它只能按 term_id 全学期扫。
+CREATE INDEX IF NOT EXISTS idx_occ_term_date ON occurrence(term_id, date);
 
 -- 应急登记：只记录"有人说了什么"，不改课表（V2.3 必测 7）。
 CREATE TABLE IF NOT EXISTS emergency_note (
@@ -210,6 +212,7 @@ CREATE TABLE IF NOT EXISTS change_case (
   status           TEXT NOT NULL CHECK (status IN ('DRAFT','PENDING_CONFIRMATION','BLOCKED_CONFLICT','APPLYING','EFFECTIVE','REJECTED','WITHDRAWN')),
   revision         INTEGER NOT NULL CHECK (revision >= 1),
   submitted_by     TEXT NOT NULL,
+  created_by       TEXT NULL,
   reason           TEXT NULL,
   idempotency_key  TEXT NULL,
   created_at       TEXT NOT NULL,
@@ -272,7 +275,7 @@ CREATE TABLE IF NOT EXISTS assignment_state (
   updated_at    TEXT NOT NULL
 );
 
--- 调课候选筛选偏好：SCHOOL 为全校默认（teacher_id 固定空串），TEACHER 为教师个人覆盖。
+-- 代课候选筛选偏好：SCHOOL 为全校默认（teacher_id 固定空串），TEACHER 为教师个人覆盖。
 -- 只影响"给发起人看的排序与显示"，不参与确认集合与冲突判定。
 CREATE TABLE IF NOT EXISTS change_preference (
   scope                    TEXT NOT NULL CHECK (scope IN ('SCHOOL','TEACHER')),
@@ -337,6 +340,22 @@ CREATE TABLE IF NOT EXISTS user_role (
   PRIMARY KEY (user_id, role)
 );
 
+-- 账号级能力授权：把某一条能力单独授予某个人，不改变其角色。
+-- 只用于校方明确裁定的个例（如教务代为发起），不是"第二个角色"：
+--   · 只能补 POLICY 里的 DENY，不能把 TBD_BLOCKED 变成可用；
+--   · 必须记录依据（文件/批复）与授予人，授予、撤销都写审计；
+--   · 会话签发时读入，已签发的会话需重新登录才生效。
+CREATE TABLE IF NOT EXISTS capability_grant (
+  user_id    TEXT NOT NULL REFERENCES app_user(id),
+  action     TEXT NOT NULL,
+  basis      TEXT NOT NULL,
+  granted_by TEXT NOT NULL,
+  granted_at TEXT NOT NULL,
+  revoked_at TEXT NULL,
+  revoked_by TEXT NULL,
+  PRIMARY KEY (user_id, action)
+);
+
 -- 会话只存 token 的 sha256，不存明文；acting_role 即"本次以哪个身份行事"。
 CREATE TABLE IF NOT EXISTS session (
   id             TEXT PRIMARY KEY,
@@ -376,6 +395,8 @@ END;
 
 CREATE INDEX IF NOT EXISTS idx_change_status ON change_case(status);
 CREATE INDEX IF NOT EXISTS idx_assignment_term ON assignment_state(term_id, date);
+-- 覆盖段的"某位教师在某区间"查询要按 st.teacher_id 命中；没有它只能按 term_id + date 扫全部变更。
+CREATE INDEX IF NOT EXISTS idx_assignment_teacher ON assignment_state(term_id, teacher_id, date);
 `;
 
 export interface TimetableRow {
@@ -397,7 +418,7 @@ export interface TimetableRow {
   readonly cancelled: boolean;
 }
 
-/** 调课候选筛选偏好；扁平列，禁止用 `as` 把 snake_case 行直接当驼峰对象。 */
+/** 代课候选筛选偏好；扁平列，禁止用 `as` 把 snake_case 行直接当驼峰对象。 */
 export interface PreferenceRecord {
   readonly scope: 'SCHOOL' | 'TEACHER';
   readonly teacherId: string;
@@ -477,29 +498,57 @@ interface RawTimetableRow {
  *
  * P2 只读派生课次时，调课生效后教师视图仍显示原教师——界面会与审计事实相反。
  * 这里统一叠加，教师/班级/全校三个视图共用同一份投影，避免各自拼 SQL 后走样。
+ *
+ * 为什么写成 base ∪ overlay 两段而不用 COALESCE：COALESCE(st.x, o.x) 对索引不透明，
+ * SQLite 只能整表扫描（40k 行约 100–400ms）。两段各自按本段的列做等值/区间匹配，
+ * 才能分别命中 idx_occ_teacher / idx_occ_class / idx_occ_term_date 与 assignment_state 的索引，
+ * 同样的结果 0.1–3ms 就能取到。语义上两段是严格等价替换：
+ *   - 第 1 段：没有覆盖行的课次，按 o.* 过滤；
+ *   - 第 2 段：有覆盖行的课次，按 st.* 过滤（覆盖行写全了教师/日期/节次/停课）。
+ * 注意第 2 段不能只按 o.date 过滤：某节课可能被改期到区间内而原始日期在区间外。
  */
-const SELECT_TIMETABLE = `
+const SELECT_EFFECTIVE_BASE = `
 SELECT o.id             AS occurrence_id,
-       COALESCE(st.date, o.date)       AS date,
-       COALESCE(st.period, o.period)   AS period,
+       o.date           AS date,
+       o.period         AS period,
        o.starts_at      AS starts_at,
        o.ends_at        AS ends_at,
        o.certainty      AS certainty,
        o.unknown_reason AS unknown_reason,
        o.class_id       AS class_id,
        c.display_name   AS class_name,
-       COALESCE(st.teacher_id, o.teacher_id) AS teacher_id,
+       o.teacher_id     AS teacher_id,
        t.display_name   AS teacher_name,
        o.subject_id     AS subject_id,
        s.name           AS subject_name,
        o.data_origin    AS data_origin,
-       COALESCE(st.cancelled, 0) AS cancelled
+       0                AS cancelled
   FROM occurrence o
-  LEFT JOIN assignment_state st ON st.occurrence_id = o.id
   JOIN school_class c ON c.id = o.class_id
-  JOIN teacher t      ON t.id = COALESCE(st.teacher_id, o.teacher_id)
-  JOIN subject s      ON s.id = o.subject_id
-`;
+  JOIN teacher t      ON t.id = o.teacher_id
+  JOIN subject s      ON s.id = o.subject_id`;
+
+const SELECT_EFFECTIVE_OVERLAY = `
+SELECT o.id             AS occurrence_id,
+       st.date          AS date,
+       st.period        AS period,
+       o.starts_at      AS starts_at,
+       o.ends_at        AS ends_at,
+       o.certainty      AS certainty,
+       o.unknown_reason AS unknown_reason,
+       o.class_id       AS class_id,
+       c.display_name   AS class_name,
+       st.teacher_id    AS teacher_id,
+       t.display_name   AS teacher_name,
+       o.subject_id     AS subject_id,
+       s.name           AS subject_name,
+       o.data_origin    AS data_origin,
+       st.cancelled     AS cancelled
+  FROM occurrence o
+  JOIN assignment_state st ON st.occurrence_id = o.id
+  JOIN school_class c      ON c.id = o.class_id
+  JOIN teacher t           ON t.id = st.teacher_id
+  JOIN subject s           ON s.id = o.subject_id`;
 
 function toRow(r: RawTimetableRow): TimetableRow {
   return {
@@ -590,6 +639,8 @@ export class CourseDatabase {
     this.ensureColumn('teaching_template', 'revoked_at', 'TEXT NULL');
     this.ensureColumn('audit_event', 'prev_hash', "TEXT NOT NULL DEFAULT ''");
     this.ensureColumn('audit_event', 'hash', "TEXT NOT NULL DEFAULT ''");
+    // P7 代发起：submitted_by 仍记被代教师，created_by 记实际操作人（为空=本人发起）
+    this.ensureColumn('change_case', 'created_by', 'TEXT NULL');
     // P5 之前建的库没有哈希链：这里只补算哈希，不改业务字段。
     this.auditLog.sealLegacy();
     this.db
@@ -612,6 +663,7 @@ export class CourseDatabase {
   clearAll(): void {
     for (const table of [
       'session',
+      'capability_grant',
       'user_role',
       'app_user',
       'audit_event',
@@ -940,37 +992,83 @@ export class CourseDatabase {
   }
 
   queryByTeacher(termId: string, teacherId: string, from: string, to: string): TimetableRow[] {
-    const rows = this.db
-      .prepare(
-        `${SELECT_TIMETABLE}
-          WHERE o.term_id = ? AND COALESCE(st.teacher_id, o.teacher_id) = ?
-            AND COALESCE(st.date, o.date) BETWEEN ? AND ?
-          ORDER BY COALESCE(st.date, o.date), COALESCE(st.period, o.period), o.class_id, o.id`,
-      )
-      .all(termId, teacherId, from, to) as unknown as RawTimetableRow[];
-    return rows.map(toRow);
+    return this.queryEffective(
+      termId,
+      'o.teacher_id = ? AND o.date BETWEEN ? AND ?',
+      [teacherId, from, to],
+      'st.teacher_id = ? AND st.date BETWEEN ? AND ?',
+      [teacherId, from, to],
+    );
+  }
+
+  /**
+   * 一次取多位教师的课次。代课/对调推荐要先看"同班那几位教师"和"我自己"，
+   * 逐个查会退化成 N 次索引扫描，一次 IN 命中 idx_occ_teacher 更划算。
+   *
+   * 不排序：唯一调用方是推荐计算，它自己会按日期/节次重排；整段排序要多花约 10ms，
+   * 对 200 并发是纯浪费。需要有序结果的调用方请用 queryAll / queryByClass。
+   */
+  queryByTeachers(
+    termId: string,
+    teacherIds: readonly string[],
+    from: string,
+    to: string,
+  ): TimetableRow[] {
+    const ids = [...new Set(teacherIds)];
+    if (ids.length === 0) return [];
+    const placeholders = ids.map(() => '?').join(',');
+    return this.queryEffective(
+      termId,
+      `o.teacher_id IN (${placeholders}) AND o.date BETWEEN ? AND ?`,
+      [...ids, from, to],
+      `st.teacher_id IN (${placeholders}) AND st.date BETWEEN ? AND ?`,
+      [...ids, from, to],
+      null,
+    );
   }
 
   queryByClass(termId: string, classId: string, from: string, to: string): TimetableRow[] {
-    const rows = this.db
-      .prepare(
-        `${SELECT_TIMETABLE}
-          WHERE o.term_id = ? AND o.class_id = ?
-            AND COALESCE(st.date, o.date) BETWEEN ? AND ?
-          ORDER BY COALESCE(st.date, o.date), COALESCE(st.period, o.period), o.teacher_id, o.id`,
-      )
-      .all(termId, classId, from, to) as unknown as RawTimetableRow[];
-    return rows.map(toRow);
+    return this.queryEffective(
+      termId,
+      'o.class_id = ? AND o.date BETWEEN ? AND ?',
+      [classId, from, to],
+      'o.class_id = ? AND st.date BETWEEN ? AND ?',
+      [classId, from, to],
+      'date, period, teacher_id, occurrence_id',
+    );
   }
 
   queryAll(termId: string, from: string, to: string): TimetableRow[] {
+    return this.queryEffective(
+      termId,
+      'o.date BETWEEN ? AND ?',
+      [from, to],
+      'st.date BETWEEN ? AND ?',
+      [from, to],
+    );
+  }
+
+  /**
+   * 有效课次投影的唯一出口：两段 SQL 由调用方各自给出"本段可命中的谓词"。
+   * 谓词不能合并成 COALESCE，否则两段都会退化成全表扫描（见 SELECT_EFFECTIVE_* 的注释）。
+   */
+  private queryEffective(
+    termId: string,
+    baseWhere: string,
+    baseArgs: readonly (string | number)[],
+    overlayWhere: string,
+    overlayArgs: readonly (string | number)[],
+    orderBy: string | null = 'date, period, class_id, occurrence_id',
+  ): TimetableRow[] {
+    const sql = `${SELECT_EFFECTIVE_BASE}
+ WHERE o.term_id = ? AND ${baseWhere}
+   AND NOT EXISTS (SELECT 1 FROM assignment_state x WHERE x.occurrence_id = o.id)
+UNION ALL
+${SELECT_EFFECTIVE_OVERLAY}
+ WHERE st.term_id = ? AND ${overlayWhere}${orderBy === null ? '' : `\n ORDER BY ${orderBy}`}`;
     const rows = this.db
-      .prepare(
-        `${SELECT_TIMETABLE}
-          WHERE o.term_id = ? AND COALESCE(st.date, o.date) BETWEEN ? AND ?
-          ORDER BY COALESCE(st.date, o.date), COALESCE(st.period, o.period), o.class_id, o.id`,
-      )
-      .all(termId, from, to) as unknown as RawTimetableRow[];
+      .prepare(sql)
+      .all(termId, ...baseArgs, termId, ...overlayArgs) as unknown as RawTimetableRow[];
     return rows.map(toRow);
   }
 

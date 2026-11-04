@@ -15,6 +15,8 @@ export interface ChangeCaseRecord {
   readonly status: CaseStatus;
   readonly revision: number;
   readonly submittedBy: string;
+  /** 实际操作人（代他人发起时是代办教师）；为空表示本人发起 */
+  readonly createdBy: string | null;
   readonly reason: string | null;
   readonly idempotencyKey: string | null;
   readonly createdAt: string;
@@ -56,6 +58,7 @@ interface CaseRow {
   status: string;
   revision: number;
   submitted_by: string;
+  created_by: string | null;
   reason: string | null;
   idempotency_key: string | null;
   created_at: string;
@@ -103,6 +106,7 @@ function mapCase(row: CaseRow): ChangeCaseRecord {
     status: row.status as CaseStatus,
     revision: row.revision,
     submittedBy: row.submitted_by,
+    createdBy: row.created_by ?? null,
     reason: row.reason,
     idempotencyKey: row.idempotency_key,
     createdAt: row.created_at,
@@ -131,8 +135,8 @@ export class ChangeStore {
   insertCase(record: ChangeCaseRecord): void {
     this.db
       .prepare(
-        `INSERT INTO change_case(id, term_id, kind, parent_change_id, status, revision, submitted_by, reason, idempotency_key, created_at, updated_at)
-         VALUES(?,?,?,?,?,?,?,?,?,?,?)`,
+        `INSERT INTO change_case(id, term_id, kind, parent_change_id, status, revision, submitted_by, created_by, reason, idempotency_key, created_at, updated_at)
+         VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`,
       )
       .run(
         record.id,
@@ -142,6 +146,7 @@ export class ChangeStore {
         record.status,
         record.revision,
         record.submittedBy,
+        record.createdBy,
         record.reason,
         record.idempotencyKey,
         record.createdAt,
@@ -350,17 +355,21 @@ export class ChangeStore {
     teacherName: string;
     date: string;
     period: number;
+    startsAt: string | null;
+    endsAt: string | null;
     cancelled: boolean;
     version: number;
   }> {
     if (ids.length === 0) return [];
     const placeholders = ids.map(() => '?').join(',');
-    const rows = this.db
+    return this.db
       .prepare(
         `SELECT o.id AS occurrence_id, o.class_id, c.display_name AS class_name,
                 o.subject_id, sub.name AS subject_name,
                 COALESCE(st.teacher_id, o.teacher_id) AS teacher_id, t.display_name AS teacher_name,
                 COALESCE(st.date, o.date) AS date, COALESCE(st.period, o.period) AS period,
+                -- 起止时间来自课次本身：生效变更只改教师/日期/节次/停课，不改作息
+                o.starts_at, o.ends_at,
                 COALESCE(st.cancelled, 0) AS cancelled, COALESCE(st.version, 0) AS version
            FROM occurrence o
            LEFT JOIN assignment_state st ON st.occurrence_id = o.id
@@ -370,32 +379,39 @@ export class ChangeStore {
           WHERE o.id IN (${placeholders})
           ORDER BY o.id`,
       )
-      .all(...ids) as unknown as Array<{
-      occurrence_id: string;
-      class_id: string;
-      class_name: string;
-      subject_id: string;
-      subject_name: string;
-      teacher_id: string;
-      teacher_name: string;
-      date: string;
-      period: number;
-      cancelled: number;
-      version: number;
-    }>;
-    return rows.map((r) => ({
-      occurrenceId: r.occurrence_id,
-      classId: r.class_id,
-      className: r.class_name,
-      subjectId: r.subject_id,
-      subjectName: r.subject_name,
-      teacherId: r.teacher_id,
-      teacherName: r.teacher_name,
-      date: r.date,
-      period: r.period,
-      cancelled: r.cancelled === 1,
-      version: r.version,
-    }));
+      .all(...ids)
+      .map((raw) => {
+        const r = raw as unknown as {
+          occurrence_id: string;
+          class_id: string;
+          class_name: string;
+          subject_id: string;
+          subject_name: string;
+          teacher_id: string;
+          teacher_name: string;
+          date: string;
+          period: number;
+          starts_at: string | null;
+          ends_at: string | null;
+          cancelled: number;
+          version: number;
+        };
+        return {
+          occurrenceId: r.occurrence_id,
+          classId: r.class_id,
+          className: r.class_name,
+          subjectId: r.subject_id,
+          subjectName: r.subject_name,
+          teacherId: r.teacher_id,
+          teacherName: r.teacher_name,
+          date: r.date,
+          period: r.period,
+          startsAt: r.starts_at,
+          endsAt: r.ends_at,
+          cancelled: r.cancelled === 1,
+          version: r.version,
+        };
+      });
   }
 
   /** 教师显示名；未知 ID 不出现在结果中（界面显示原 ID，不假装已解析）。 */

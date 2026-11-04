@@ -158,6 +158,37 @@ export class AuthStore {
       .run(userId, role, at, by);
   }
 
+  /** 账号级能力（不含已撤销）。只用于 can() 补 DENY，不参与角色判定。 */
+  capabilitiesOf(userId: string): string[] {
+    const rows = this.db
+      .prepare('SELECT action FROM capability_grant WHERE user_id = ? AND revoked_at IS NULL ORDER BY action')
+      .all(userId) as unknown as Array<{ action: string }>;
+    return rows.map((r) => r.action);
+  }
+
+  grantCapability(input: {
+    readonly userId: string;
+    readonly action: string;
+    readonly basis: string;
+    readonly by: string;
+    readonly at: string;
+  }): void {
+    this.db
+      .prepare(
+        `INSERT INTO capability_grant(user_id, action, basis, granted_by, granted_at) VALUES(?,?,?,?,?)
+         ON CONFLICT(user_id, action) DO UPDATE SET basis = excluded.basis,
+           granted_by = excluded.granted_by, granted_at = excluded.granted_at,
+           revoked_at = NULL, revoked_by = NULL`,
+      )
+      .run(input.userId, input.action, input.basis, input.by, input.at);
+  }
+
+  revokeCapability(userId: string, action: string, at: string, by: string): void {
+    this.db
+      .prepare('UPDATE capability_grant SET revoked_at = ?, revoked_by = ? WHERE user_id = ? AND action = ?')
+      .run(at, by, userId, action);
+  }
+
   updatePassword(userId: string, passwordHash: string, at: string, mustChange: boolean): void {
     this.db
       .prepare('UPDATE app_user SET password_hash = ?, password_changed_at = ?, must_change_password = ? WHERE id = ?')

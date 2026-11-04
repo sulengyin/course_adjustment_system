@@ -38,6 +38,11 @@ export interface Principal {
   readonly roles: readonly Role[];
   /** 本次会话显式选择的身份；一人多角色时必须指定 */
   readonly actingRole: Role;
+  /**
+   * 账号级能力（来自 capability_grant）。不是角色：只能补 POLICY 里的 DENY，
+   * 不能把 TBD_BLOCKED 变成可用；签发会话时读入，改授权需重新登录。
+   */
+  readonly grants?: readonly string[];
   readonly sessionId: string;
   /** 首登未改密：除改密与登出外一律拒绝 */
   readonly mustChangePassword: boolean;

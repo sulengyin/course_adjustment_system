@@ -18,6 +18,7 @@ export type Action =
   | 'IMPORT_ROSTER'
   | 'PUBLISH_TIMETABLE'
   | 'CREATE_OWN_CHANGE'
+  | 'CREATE_CHANGE_ON_BEHALF'
   | 'DECIDE_OWN_CONFIRMATION'
   | 'VIEW_OWN_AUDIT'
   | 'VIEW_SCHOOL_AUDIT'
@@ -55,6 +56,10 @@ export const POLICY: Readonly<Record<Action, Row>> = Object.freeze({
   // 发布岗位未证实（AC01）：S 也只有 TBD_BLOCKED
   PUBLISH_TIMETABLE: row(DENY, TBD, DENY, DENY, DENY, DENY),
   CREATE_OWN_CHANGE: row(ALLOW, DENY, DENY, DENY, DENY, DENY),
+  // 代他人发起：docs/permission-matrix.md 原先写"任何角色都不允许"。
+  // 现按校方裁定改为"默认全拒 + 账号级单点授权"，因此角色这一列仍全部 DENY，
+  // 只有 capability_grant 里显式列名的人能通过 can()。
+  CREATE_CHANGE_ON_BEHALF: row(DENY, DENY, DENY, DENY, DENY, DENY),
   // 确认本人课务：身份即授权，与角色无关；管理员不在此列（INV-08）
   DECIDE_OWN_CONFIRMATION: row(ALLOW, ALLOW, ALLOW, ALLOW, ALLOW, DENY),
   VIEW_OWN_AUDIT: row(ALLOW, ALLOW, ALLOW, ALLOW, ALLOW, ALLOW),
@@ -87,7 +92,8 @@ export const ACTION_LABEL: Readonly<Record<Action, string>> = Object.freeze({
   IMPORT_TIMETABLE: '导入课表文件',
   IMPORT_ROSTER: '导入教师 / 班级名单',
   PUBLISH_TIMETABLE: '正式发布课表',
-  CREATE_OWN_CHANGE: '发起本人调课方案',
+  CREATE_OWN_CHANGE: '发起本人调课方案（代课／对调／调整时间／停课）',
+  CREATE_CHANGE_ON_BEHALF: '代他人发起调课方案',
   DECIDE_OWN_CONFIRMATION: '确认本人课务',
   VIEW_OWN_AUDIT: '查看本人相关审计',
   VIEW_SCHOOL_AUDIT: '查看全校审计',
@@ -126,5 +132,12 @@ export function decidePolicy(actingRole: Role, action: Action): PolicyDecision {
 }
 
 export function can(principal: Principal, action: Action): PolicyDecision {
-  return decidePolicy(principal.actingRole, action);
+  const decision = decidePolicy(principal.actingRole, action);
+  if (decision.allowed) return decision;
+  // 账号级授权只补角色表的 DENY。TBD_BLOCKED 表示"校方尚未指定责任人"，
+  // 属于制度未定，不是权限不足，因此绝不能被人个授权打开（permission-matrix 规则 3）。
+  if (decision.code === 'FORBIDDEN' && (principal.grants ?? []).includes(action)) {
+    return { allowed: true, code: 'ALLOWED', action, actingRole: principal.actingRole };
+  }
+  return decision;
 }

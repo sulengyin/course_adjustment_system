@@ -171,7 +171,8 @@ export type RequestListener = (req: IncomingMessage, res: ServerResponse) => voi
 
 export function createHandler(deps: AppDeps): RequestListener {
   const status = deps.status ?? new StatusService(deps.db, deps.now);
-  const candidates = deps.candidates ?? new CandidateService(deps.db);
+  // 时钟统一从依赖注入透传：推荐要判断"这节课是不是已经过去"，必须和服务端时间为准
+  const candidates = deps.candidates ?? new CandidateService(deps.db, deps.now ? { now: deps.now } : {});
   const preferences = deps.preferences ?? new ChangePreferenceService(deps.db, deps.now ? { now: deps.now } : {});
   return (req, res) => {
     const startedAt = Date.now();
@@ -354,7 +355,7 @@ export function createHandler(deps: AppDeps): RequestListener {
       return;
     }
 
-    // 调课对象候选：只读排课事实，不落库；只有该课次的现任授课教师能拿到名单。
+    // 代课对象候选：只读排课事实，不落库；只有该课次的现任授课教师能拿到名单。
     // 必须排在 /api/changes/:id 之前，否则会被方案详情的正则吃掉。
     if (path === '/api/changes/candidates' && method === 'GET') {
       const termId = url.searchParams.get('termId');
@@ -380,6 +381,51 @@ export function createHandler(deps: AppDeps): RequestListener {
               ? 409
               : 403;
       send(res, httpStatus, suggestion as unknown as Json);
+      return;
+    }
+
+    /**
+     * 对调对象推荐：只推荐本学期任教该班的教师，具体到"哪几节课可以换"。
+     * 不推荐的教师同样返回并附理由；仍然只是建议，不建方案。
+     */
+    if (path === '/api/changes/swap-candidates' && method === 'GET') {
+      const termId = url.searchParams.get('termId');
+      const occurrenceId = url.searchParams.get('occurrenceId');
+      if (!termId || !occurrenceId) return fail(res, 400, 'BAD_INPUT');
+      const result = candidates.swapCandidates(termId, occurrenceId, principal);
+      const httpStatus =
+        result.code === 'FOUND'
+          ? 200
+          : result.code === 'OCCURRENCE_NOT_FOUND' || result.code === 'TERM_NOT_FOUND'
+            ? 404
+            : result.code === 'OCCURRENCE_CANCELLED'
+              ? 409
+              : 403;
+      send(res, httpStatus, result as unknown as Json);
+      return;
+    }
+
+    /**
+     * 跨天对调：先选人，再选对方可让出的课次。
+     * 只返回"对方有哪些课可以换"以及换完之后对方当天还剩几节，不建方案。
+     */
+    if (path === '/api/changes/swap-options' && method === 'GET') {
+      const termId = url.searchParams.get('termId');
+      const occurrenceId = url.searchParams.get('occurrenceId');
+      const teacherId = url.searchParams.get('teacherId');
+      if (!termId || !occurrenceId || !teacherId) return fail(res, 400, 'BAD_INPUT');
+      const result = candidates.swapOptions(termId, occurrenceId, teacherId, principal);
+      const httpStatus =
+        result.code === 'FOUND'
+          ? 200
+          : result.code === 'OCCURRENCE_NOT_FOUND' || result.code === 'TERM_NOT_FOUND'
+            ? 404
+            : result.code === 'OCCURRENCE_CANCELLED'
+              ? 409
+              : result.code === 'COUNTERPART_NOT_FOUND'
+                ? 404
+                : 403;
+      send(res, httpStatus, result as unknown as Json);
       return;
     }
 
@@ -415,7 +461,7 @@ export function createHandler(deps: AppDeps): RequestListener {
     }
 
     /**
-     * 调课候选筛选偏好：读自己生效的那套（个人覆盖 > 全校默认 > 中性默认），
+     * 代课候选筛选偏好：读自己生效的那套（个人覆盖 > 全校默认 > 中性默认），
      * 并同时给出全校默认，便于界面说明"当前用的是谁的口径"。
      */
     if (path === '/api/preferences/change' && method === 'GET') {
@@ -505,12 +551,22 @@ export function createHandler(deps: AppDeps): RequestListener {
       // 写操作必须带幂等键：缺失时无法区分"重试"与"新请求"，重试会重复建单。
       const idempotencyKey = typeof body.idempotencyKey === 'string' ? body.idempotencyKey.trim() : '';
       if (idempotencyKey === '') return fail(res, 400, 'BAD_INPUT');
+      // 代他人发起：只接受一个明确字符串。空串/非字符串都当输入错误，
+      // 不做"猜一个默认值"——猜错就等于替别人建了一笔他没同意的方案。
+      let onBehalfOfTeacherId: string | null = null;
+      if (body.onBehalfOfTeacherId !== undefined && body.onBehalfOfTeacherId !== null) {
+        if (typeof body.onBehalfOfTeacherId !== 'string' || body.onBehalfOfTeacherId.trim() === '') {
+          return fail(res, 400, 'BAD_INPUT');
+        }
+        onBehalfOfTeacherId = body.onBehalfOfTeacherId.trim();
+      }
       const summary = deps.changes.submitNew({
         termId: String(body.termId ?? ''),
         principal,
         items,
         reason: typeof body.reason === 'string' ? body.reason : null,
         idempotencyKey,
+        onBehalfOfTeacherId,
       });
       send(res, summary.ok ? 200 : 409, summary as unknown as Json);
       return;
