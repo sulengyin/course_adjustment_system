@@ -1,0 +1,44 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# 同一分支连续推送时只保留最新一次，避免排队堆积
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+
+      - run: npm ci
+
+      - name: 类型检查
+        run: npm run typecheck
+
+      # 并发上限压到 2：bcrypt 重的用例在少核机器上并行跑会超时，
+      # 那不是代码问题，但会让 CI 变成"红着也没人看"的噪音。
+      - name: 全量测试
+        run: npx vitest run --maxWorkers=2
+
+      # 库文件与真实数据必须在仓库外。这条规则极窄，几乎不会误报。
+      - name: 禁止库文件入库
+        run: |
+          if git ls-files | grep -qE '\.(sqlite|sqlite3|db)$'; then
+            echo "::error::仓库中出现数据库文件，真实数据不得入库"
+            git ls-files | grep -E '\.(sqlite|sqlite3|db)$'
+            exit 1
+          fi

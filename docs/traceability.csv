@@ -170,3 +170,5 @@ P7Q-2,权限,账号级授权只能补 DENY、不能打开 TBD_BLOCKED；必须�
 P7Q-3,界面,查看他人课表对全体登录教师开放且只读；选教师改为输入即筛选（不再平铺全校名单）,docs/permission-matrix.md 操作表,P7Q,,tests/ui/render.spec.ts,verified
 P7R-1,界面,打开他人课表后本人课表暂时收起（#timetable-mine 隐藏），页面只留对方一张表并可"返回我的课表"，避免两张同形表格点错一格,docs/13 §7.10,P7R,,tests/ui/render.spec.ts,verified
 P7R-2,调课,持有 CREATE_CHANGE_ON_BEHALF 者可直接点他人课表里的一节课进入代发起并选中该课次；无此能力者格子为 div、纯只读,docs/13 §7.10; docs/permission-matrix.md 文末,P7R,,tests/ui/render.spec.ts,verified
+P7T-1,部署,从系统自带终端启动不得依赖 bash 与 node 已在 PATH 中；找不到解释器时要说明预期位置而不是只报 command not found,docs/11 §2.1,P7T,,scripts/serve-auto.sh,verified
+P7T-2,可靠,TMPDIR 不可写时改指可写缓存目录，否则 tsx 建 socket 报 EACCES 导致服务起不来,docs/11 §2.1,P7T,,scripts/serve-auto.sh,verified

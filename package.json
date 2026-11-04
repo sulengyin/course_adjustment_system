@@ -1,7 +1,7 @@
 {
   "name": "course-adjustment-spec",
   "private": true,
-  "version": "0.2.0",
+  "version": "0.3.0",
   "type": "module",
   "description": "校内课务协同系统 — 契约层 + 领域内核（仅虚构数据）",
   "scripts": {
