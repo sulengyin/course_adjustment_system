@@ -5,6 +5,8 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  # 手动触发：改完 workflow 想立刻验一次，不用等下一次提交
+  workflow_dispatch:
 
 # 同一分支连续推送时只保留最新一次，避免排队堆积
 concurrency:
@@ -12,6 +14,8 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # ── 1. 单元与契约 ───────────────────────────────────────────────
+  # 快、便宜、先跑。这一层不过，后面的冒烟和浏览器测试不用开始。
   verify:
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -42,3 +46,78 @@ jobs:
             git ls-files | grep -E '\.(sqlite|sqlite3|db)$'
             exit 1
           fi
+
+  # ── 2. 真实进程 + 真实 HTTP 的端到端冒烟 ──────────────────────
+  # 单测跑的是函数，这里跑的是"起得来的服务"。两者会分开失败：
+  # 端口绑定、环境变量拼装、种子顺序、审计链校验都只有真启动才暴露。
+  # 两个脚本都自建临时库、自选空闲端口、结束即删，不依赖任何外部服务。
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+
+      - run: npm ci
+
+      # 登录 → 强制改密 → 我的课表 → 发起调课 → 对方确认 → 本人确认 →
+      # 生效 → 对方课表出现该课次 → 求助 → 后续动作被拒 → 审计链
+      - name: 业务闭环冒烟
+        run: npm run smoke:ui
+
+      # 环境变量入口、备份与恢复演练
+      - name: 部署冒烟
+        run: npm run smoke:deploy
+
+      - name: 保存冒烟日志
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-logs
+          path: |
+            /tmp/ca-*/**/*.log
+          if-no-files-found: ignore
+          retention-days: 7
+
+  # ── 3. 多视口浏览器测试 ────────────────────────────────────────
+  # 覆盖的是响应式与触控：窄屏有没有横向溢出、按钮够不够大、课表能不能横滑、
+  # 有没有 JS 报错。这些在 fake DOM 里量不出来，必须有真实排版引擎。
+  #
+  # 边界要说清：这里用的是 Chromium + 视口与 UA 模拟，**不是真机**。
+  # iOS Safari 的滚动惯性、软键盘顶起、微信/钉钉内置 WebView 的差异测不到，
+  # 那部分仍要靠 docs/reports/P7-T04 的实机清单，不能拿这个 job 顶替。
+  mobile:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+
+      - run: npm ci
+
+      - name: 安装 Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: 多视口测试
+        run: npx playwright test
+
+      - name: 保存失败截图与报告
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: |
+            playwright-report/
+            test-results/
+          if-no-files-found: ignore
+          retention-days: 7

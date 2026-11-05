@@ -5,7 +5,16 @@
 
 ## [Unreleased]
 
-（待发布内容）
+### 工程
+
+- CI 拆成三层 job，各自能独立红：
+  `verify`（类型检查 + 全量单测）、`smoke`（真实进程跑业务闭环与备份恢复）、
+  `mobile`（Chromium 多视口 320 / 375 / 412 / 430 / 1280）。
+- 新增 `npm run test:e2e`（Playwright）与 `scripts/ci-serve-demo.sh`
+  （临时库 + 种子 + 前台服务，测试结束即弃）。
+- 明确边界：`mobile` 是视口与 UA 模拟，**不是真机**。iOS Safari 的滚动惯性、
+  软键盘顶起、微信/钉钉内置 WebView 的差异测不到，不得以 CI 绿替代
+  `docs/reports/P7-T04实机验收清单.md` 的 `PASS`。
 
 ## [0.3.0] - 2026-11-04
 

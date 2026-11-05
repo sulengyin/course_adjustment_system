@@ -173,3 +173,5 @@ P7R-2,调课,持有 CREATE_CHANGE_ON_BEHALF 者可直接点他人课表里的一
 P7T-1,部署,从系统自带终端启动不得依赖 bash 与 node 已在 PATH 中；找不到解释器时要说明预期位置而不是只报 command not found,docs/11 §2.1,P7T,,scripts/serve-auto.sh,verified
 P7T-2,可靠,TMPDIR 不可写时改指可写缓存目录，否则 tsx 建 socket 报 EACCES 导致服务起不来,docs/11 §2.1,P7T,,scripts/serve-auto.sh,verified
 P7T-3,部署,演示实例默认不常驻：serve:auto 只保证正式实例，演示需 CA_WITH_DEMO=1；--stop-demo 只停演示不动正式,docs/11 §2,P7T,,scripts/serve-auto.sh,verified
+P7U-1,工程,CI 分三层：单元与契约为 main 硬标准，冒烟与多视口并行跑在独立 job；任一层红都不算通过,docs/14 §8,.github/workflows/ci.yml,P7U,,scripts/smoke-ui.ts; scripts/smoke-deploy.sh,verified
+P7U-2,测试,多视口 e2e 只是 Chromium 视口模拟，不得用 CI 绿代替 T-04 实机验收；清单状态仍只能是 PASS/FAIL/NOT_RUN,docs/14 §8,docs/reports/P7-T04实机验收清单.md,P7U,,tests/e2e/mobile.spec.ts,verified

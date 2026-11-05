@@ -29,7 +29,18 @@
 npm install
 npm test          # 全量测试：契约规格 + 领域 + 服务 + HTTP + 界面渲染
 npm run typecheck # tsc --noEmit
+
+# 真实进程 + 真实 HTTP，自建临时库、自选端口、结束即删
+npm run smoke:ui      # 登录→改密→课表→发起调课→双方确认→生效→求助→审计链
+npm run smoke:deploy  # 环境变量入口 + 备份恢复演练
+
+# 多视口浏览器测试（首次需装 Chromium）
+npx playwright install chromium
+npm run test:e2e      # 320/375/412/430/1280 五个视口
 ```
+
+三层测试的分工，以及**它们各自测不到什么**，写在 `docs/14 §8`。一句话：
+`test:e2e` 是 Chromium 的视口模拟，不是真机，iOS Safari 与微信/钉钉 WebView 的差异仍要实机验收。
 
 ### 起一个演示实例
 

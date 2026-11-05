@@ -29,9 +29,11 @@
     "reset-password": "tsx scripts/reset-password.ts",
     "grant-role": "tsx scripts/grant-role.ts",
     "set-mode": "tsx scripts/set-mode.ts",
-    "grant-capability": "tsx scripts/grant-capability.ts"
+    "grant-capability": "tsx scripts/grant-capability.ts",
+    "test:e2e": "playwright test"
   },
   "devDependencies": {
+    "@playwright/test": "^1.64.1",
     "@types/node": "^26.6.6",
     "tsx": "^4.23.15",
     "typescript": "^5.9.3",
