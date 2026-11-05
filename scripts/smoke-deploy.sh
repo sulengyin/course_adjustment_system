@@ -33,6 +33,14 @@ PW=$(printf '%s\n' "$INIT" | sed -n 's/.*一次性初始口令：//p')
 [ -n "$PW" ] || fail "未取得初始口令"
 PW_JSON=$(node -e 'process.stdout.write(JSON.stringify(process.argv[1]))' "$PW")
 
+echo "== 1b. 新库必须先声明环境，否则拒绝启动 =="
+UNSET_OUT=$(CA_BIND_ADDRESS=127.0.0.1 CA_PORT=$PORT CA_DB_PATH="$WORK/unset.sqlite" node --import tsx scripts/serve.ts 2>&1)
+UNSET_CODE=$?
+echo "未声明环境: exit=$UNSET_CODE $UNSET_OUT"
+[ "$UNSET_CODE" -ne 0 ] || fail "未声明环境的库竟然启动成功"
+node -e 'require("fs").rmSync(process.argv[1], { force: true })' "$WORK/unset.sqlite"
+CA_DB_PATH="$DB" CA_MODE=production node --import tsx scripts/set-mode.ts || fail "设定环境失败"
+
 echo "== 2. 通配地址必须拒绝启动 =="
 CA_BIND_ADDRESS=0.0.0.0 CA_PORT=$PORT CA_DB_PATH="$DB" node --import tsx scripts/serve.ts > "$WORK/refuse.log" 2>&1
 CODE=$?
