@@ -159,6 +159,8 @@ export class AuthService {
       readonly displayName: string;
       readonly teacherId?: string | null;
       readonly roles: readonly string[];
+      /** 指定初始口令（演示种子用）；不传则随机生成。两种情况下本人首登都必须改密。 */
+      readonly password?: string;
     },
   ): { readonly userId: string; readonly initialPassword: string } {
     this.requireAction(principal, 'MANAGE_ACCOUNTS');
@@ -185,7 +187,11 @@ export class AuthService {
 
     const at = this.now();
     const userId = this.newId();
-    const initialPassword = generateInitialPassword();
+    const initialPassword = input.password ?? generateInitialPassword();
+    if (input.password !== undefined) {
+      const problem = checkPasswordStrength({ next: input.password, previous: null });
+      if (problem) throw new AuthError('WEAK_PASSWORD', `口令不符合最低要求：${problem}`);
+    }
     this.db.transaction(() => {
       this.store.insertUser({
         id: userId,

@@ -54,6 +54,9 @@ npm run seed:demo                              # 生成虚构校历与演示账�
 CA_BIND_ADDRESS=192.168.x.x CA_PORT=18088 CA_DB_PATH="$CA_DB_PATH" npm run serve
 ```
 
+`seed:demo` 会打印一个**随机**初始口令，演示账号共用它，只出现这一次；登录后必须先改成自己的口令。
+仓库里没有可用的默认口令，拿不到这次输出就进不去。
+
 已经按 `serve:auto` 部署过时，更省事的做法是 `CA_WITH_DEMO=1 npm run serve:auto`，
 用完 `npm run serve:auto -- --stop-demo` 只停演示，正式实例不受影响。
 

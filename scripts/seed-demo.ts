@@ -5,6 +5,9 @@
  *  1. 只写 SIMULATED 数据，不碰真实学校的任何文件。
  *  2. 库里已有数据时拒绝执行，避免把正式数据清空。
  *  3. 账号一律 must_change_password=1，首次登录必须改密——演示也不例外。
+ *
+ * 口令：默认随机生成一个，全部账号共用，打印一次。仓库里不存在可用的默认口令，
+ * 拿不到这次输出就进不去；CA_SEED_PASSWORD 只用于确实需要固定口令的场合。
  */
 
 import { CourseDatabase, MODE_LABEL } from '../src/store/database.js';
@@ -12,9 +15,11 @@ import { DEFECTS, DEMO_SNAPSHOT } from '../src/store/fixtures.js';
 import { TimetableService } from '../src/service/timetable-service.js';
 import { AuthService } from '../src/auth/service.js';
 import type { LoginResult } from '../src/auth/service.js';
+import { AuthStore } from '../src/auth/store.js';
+import { generateInitialPassword } from '../src/auth/password.js';
 
 const dbPath = process.env.CA_DB_PATH?.trim() ?? '';
-const password = process.env.CA_SEED_PASSWORD?.trim() || 'Demo!2026pass';
+const password = process.env.CA_SEED_PASSWORD?.trim() || generateInitialPassword();
 
 function assertLogin(result: LoginResult): Extract<LoginResult, { ok: true }> {
   if (!result.ok) throw new Error(`登录失败：${result.code}`);
@@ -61,23 +66,29 @@ function main(): void {
     );
 
     const auth = new AuthService(db);
-    // 先用一次性口令建号，立刻改成部署方指定的口令；这样打印出来的就是可用口令。
-    const boot = auth.bootstrapAdmin({ loginName: 'admin', displayName: '系统管理员' });
-    const first = assertLogin(auth.login('admin', boot.initialPassword, 'A'));
-    auth.changePassword(first.principal, boot.initialPassword, password);
+    const store = new AuthStore(db.handle);
+    // 全部账号共用一个初始口令：演示时不必逐个抄写，但谁都不知道别人的新口令。
+    const boot = auth.bootstrapAdmin({ loginName: 'admin', displayName: '系统管理员', password });
+    // 建号要用管理会话，而"首登未改密"的会话会被 requireAction 拦下。
+    // 这里只临时放开 admin 的门禁，建完立刻恢复：库里的 admin 最终仍是首登必须改密。
+    store.setMustChangePassword(boot.userId, false);
     const admin = assertLogin(auth.login('admin', password, 'A'));
 
     const created: Array<{ loginName: string; displayName: string; roles: string; password: string }> = [];
 
     const addUser = (loginName: string, displayName: string, teacherId: string | null, roles: string[]): void => {
-      const result = auth.createUser(admin.principal, { loginName, displayName, teacherId, roles });
+      const result = auth.createUser(admin.principal, { loginName, displayName, teacherId, roles, password });
       created.push({ loginName, displayName, roles: roles.join('+'), password: result.initialPassword });
     };
 
-    addUser('teacher01', '示例教师甲', 'T01', ['T']);
-    addUser('teacher02', '示例教师乙', 'T02', ['T']);
-    addUser('teacher03', '示例教师丙', 'T03', ['T']);
-    addUser('staff', '课务管理人员', null, ['S']);
+    try {
+      addUser('teacher01', '示例教师甲', 'T01', ['T']);
+      addUser('teacher02', '示例教师乙', 'T02', ['T']);
+      addUser('teacher03', '示例教师丙', 'T03', ['T']);
+      addUser('staff', '课务管理人员', null, ['S']);
+    } finally {
+      store.setMustChangePassword(boot.userId, true);
+    }
 
     const stats = db.occurrenceStats(DEMO_SNAPSHOT.term.id);
 
@@ -86,10 +97,12 @@ function main(): void {
     console.log(`学期：${DEMO_SNAPSHOT.term.label}　课次：${build.occurrenceCount}（SIMULATED ${stats.simulated}）`);
     console.log('');
     console.log('账号：');
-    console.log(`  admin      系统管理员（A）　口令 ${password}（初始化时已设置）`);
+    console.log(`  admin      系统管理员（A）　初始口令 ${password}`);
     for (const user of created) {
       console.log(`  ${user.loginName.padEnd(10)} ${user.displayName}（${user.roles}）　初始口令 ${user.password}`);
     }
+    console.log('');
+    console.log('以上为全部账号共用的初始口令，只在这里输出一次；首次登录必须改成自己的口令。');
     console.log('');
     console.log('已知缺陷（样本故意保留）：');
     for (const defect of DEFECTS) console.log(`  · ${defect}`);

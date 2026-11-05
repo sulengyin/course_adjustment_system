@@ -15,8 +15,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 const ROOT = process.cwd();
-const SEED_PASSWORD = 'Demo!2026pass';
-const PASSWORD = { teacher01: 'Teacher!2026x', teacher02: 'Teacher!2026y' };
+const PASSWORD = { admin: 'Admin!2026smoke', teacher01: 'Teacher!2026x', teacher02: 'Teacher!2026y' };
 
 function check(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(`SMOKE_FAIL: ${message}`);
@@ -44,7 +43,7 @@ function freePort(): Promise<number> {
 function runSeed(dbPath: string): Map<string, string> {
   const result = spawnSync(process.execPath, ['--import', 'tsx', 'scripts/seed-demo.ts'], {
     cwd: ROOT,
-    env: { ...process.env, CA_DB_PATH: dbPath, CA_SEED_PASSWORD: SEED_PASSWORD },
+    env: { ...process.env, CA_DB_PATH: dbPath },
     encoding: 'utf8',
   });
   if (result.status !== 0) {
@@ -167,9 +166,7 @@ async function main(): Promise<void> {
       return String(again.data.token);
     }
 
-    const adminLogin = await call('/api/auth/login', { method: 'POST', body: { loginName: 'admin', password: SEED_PASSWORD } });
-    check(adminLogin.status === 200, `管理员登录失败：${JSON.stringify(adminLogin.data)}`);
-    const adminToken = String(adminLogin.data.token);
+    const adminToken = await login('admin', passwords.get('admin') as string, PASSWORD.admin);
     const t01 = await login('teacher01', passwords.get('teacher01') as string, PASSWORD.teacher01);
     const t02 = await login('teacher02', passwords.get('teacher02') as string, PASSWORD.teacher02);
     console.log('登录与强制改密：OK');

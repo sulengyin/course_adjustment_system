@@ -63,6 +63,32 @@ describe('账号与开户', () => {
     );
   });
 
+  it('演示种子可以指定共用初始口令，但本人首登仍须改密', () => {
+    const h = harness();
+    const created = h.auth.createUser(h.admin, {
+      loginName: 'demo-seed',
+      displayName: '演示账号',
+      roles: ['S'],
+      password: 'Shared!Seed2026',
+    });
+    expect(created.initialPassword).toBe('Shared!Seed2026');
+    const login = h.auth.login('demo-seed', 'Shared!Seed2026');
+    expect(login.ok).toBe(true);
+    if (login.ok) expect(login.principal.mustChangePassword).toBe(true);
+  });
+
+  it('指定的初始口令同样要过强度检查', () => {
+    const h = harness();
+    expect(() =>
+      h.auth.createUser(h.admin, {
+        loginName: 'weak-seed',
+        displayName: 'x',
+        roles: ['S'],
+        password: '123456',
+      }),
+    ).toThrow(/口令不符合最低要求/);
+  });
+
   it('不允许把未定职责授予任何人（R/J/C）', () => {
     const h = harness();
     for (const role of ['R', 'J', 'C']) {

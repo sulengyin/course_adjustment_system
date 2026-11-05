@@ -195,6 +195,16 @@ export class AuthStore {
       .run(passwordHash, at, mustChange ? 1 : 0, userId);
   }
 
+  /**
+   * 只改"下次登录必须改密"标志，不动口令与改密时间。
+   * 用途：种子脚本建号期间临时放开首个管理员的门禁，建完立刻恢复。
+   */
+  setMustChangePassword(userId: string, mustChange: boolean): void {
+    this.db
+      .prepare('UPDATE app_user SET must_change_password = ? WHERE id = ?')
+      .run(mustChange ? 1 : 0, userId);
+  }
+
   disableUser(userId: string, at: string, by: string): void {
     this.db
       .prepare("UPDATE app_user SET status = 'DISABLED', disabled_at = ?, disabled_by = ? WHERE id = ?")

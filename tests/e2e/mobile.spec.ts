@@ -42,10 +42,10 @@ async function login(page: Page): Promise<void> {
 const SEED_WORK = process.env.CA_E2E_WORK ?? '/tmp/ca-e2e';
 
 /**
- * 从种子日志里取一次性初始口令。
+ * 从种子日志里取初始口令。
  *
- * seed-demo.ts 给 teacher01 这类账号生成的是随机口令，只打印一次。
- * 与其为了测试把它们改成固定口令（那会破坏"演示账号必须一次性口令"这条约束），
+ * seed-demo.ts 生成一个随机初始口令，全部账号共用，只打印一次。
+ * 与其为了测试改回固定口令（那会破坏"演示账号首登必须改密"这条约束），
  * 不如把那份输出落盘读回来。格式变了会在这里明确失败，而不是让后面 5 个用例莫名 401。
  */
 function initialPasswordOf(loginName: string): string {
