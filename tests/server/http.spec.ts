@@ -591,7 +591,6 @@ describe('代课候选筛选偏好接口', () => {
     considerSameGrade: true,
     considerSameSubject: true,
     considerLightLoad: true,
-    excludeBusyAtSlot: false,
     excludeConsecutive: false,
     consecutiveLimit: 3,
     excludeDayTotal: false,
@@ -652,7 +651,7 @@ describe('代课候选筛选偏好接口', () => {
     const saved = await call('/api/preferences/change/school', {
       method: 'PUT',
       token: schoolToken,
-      body: { ...PREF, excludeBusyAtSlot: true },
+      body: { ...PREF, excludeConsecutive: true, consecutiveLimit: 4 },
     });
     expect(saved.status).toBe(200);
 
@@ -662,7 +661,7 @@ describe('代课候选筛选偏好接口', () => {
     expect(seen.body.source).toBe('SCHOOL_DEFAULT');
   });
 
-  it('候选预览：勾选排除后只留能直接接下的，被排除者连同原因返回', async () => {
+  it('候选预览：默认只给该节次无课的教师，被排除者连同原因返回', async () => {
     const token = await loginThroughHttp('teacher01', TEACHER_PW);
     // 找一节"同一时段还有别的教师有课"的课，才能观察到排除效果
     const mine = await call(`/api/timetable/me?termId=${TERM}&from=${FROM}&to=${TO}`, { token });
@@ -680,18 +679,10 @@ describe('代课候选筛选偏好接口', () => {
       body: { termId: TERM, occurrenceId, preference: PREF },
     });
     expect(all.status).toBe(200);
-    expect((all.body.excluded as unknown[]).length).toBe(0);
-
-    const filtered = await call('/api/changes/candidates/preview', {
-      method: 'POST',
-      token,
-      body: { termId: TERM, occurrenceId, preference: { ...PREF, excludeBusyAtSlot: true } },
-    });
-    expect(filtered.status).toBe(200);
-    const kept = filtered.body.candidates as Array<{ freeAtSlot: boolean }>;
+    const kept = all.body.candidates as Array<{ freeAtSlot: boolean }>;
     expect(kept.every((c) => c.freeAtSlot)).toBe(true);
-    const dropped = filtered.body.excluded as Array<{ teacherId: string; reasons: string[] }>;
-    // 被排除的人必须连同原因返回，不允许悄悄消失
+    const dropped = all.body.excluded as Array<{ teacherId: string; reasons: string[] }>;
+    // 被排除的人必须连同原因返回，不允许悄悄消失；演示排课无冲突时这里为空
     for (const d of dropped) {
       expect(d.reasons.join('；')).toContain('该节次本人有课');
       expect(d.teacherId).toBeTruthy();
@@ -711,7 +702,7 @@ describe('代课候选筛选偏好接口', () => {
     const saved = await call('/api/preferences/change', {
       method: 'PUT',
       token,
-      body: { ...PREF, excludeBusyAtSlot: true },
+      body: { ...PREF, excludeConsecutive: true, consecutiveLimit: 4 },
     });
     expect(saved.status).toBe(200);
 

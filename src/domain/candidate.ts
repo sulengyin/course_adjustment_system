@@ -49,9 +49,13 @@ export interface CandidateConsider {
   readonly lightLoad: boolean;
 }
 
-/** 硬排除。全部默认关闭：默认只排序、不隐藏任何人。 */
+/**
+ * 硬排除。全部默认关闭：默认只排序、不隐藏任何人。
+ *
+ * 这里没有"该节次有课"：代课是请对方来上这一节，对方同时段有课就上不了，
+ * 那是物理冲突而不是口径偏好，见 `rankCandidates` 里的无条件排除。
+ */
 export interface CandidateExclude {
-  readonly busyAtSlot: boolean;
   readonly consecutive: boolean;
   readonly consecutiveLimit: number;
   readonly dayTotal: boolean;
@@ -210,8 +214,15 @@ export function rankCandidates(input: CandidateInput): CandidateRanking {
 
     // 硬排除：按偏好执行，逐条记录原因
     const excludeReasons: string[] = [];
-    if (preference.exclude.busyAtSlot && !freeAtSlot) {
-      excludeReasons.push(`该节次本人有课（第${targetPeriod}节）`);
+    // 该节次已经有课 = 接不了。代课是把这一节交给对方，对方同时段自己在别的班上课，
+    // 两边撞在一起，除非再连锁调一次——那已经不是"代课"能解决的事，应走对调。
+    // 所以这条不随偏好开关，一律排除；原因照实返回，让人知道谁被跳过了、为什么。
+    if (!freeAtSlot) {
+      excluded.push({
+        teacherId: teacher.id,
+        reasons: [`该节次本人有课（第${targetPeriod}节），无法同时接手`],
+      });
+      continue;
     }
     if (preference.exclude.consecutive && runAfter >= preference.exclude.consecutiveLimit) {
       excludeReasons.push(`接手后将连续上 ${runAfter} 节课（上限 ${preference.exclude.consecutiveLimit}）`);
@@ -234,8 +245,7 @@ export function rankCandidates(input: CandidateInput): CandidateRanking {
     if (teachesClass) reasons.push('本学期任教这个班');
     else if (inSameGrade) reasons.push(`本学期任教同年级（${grade ?? '未知年级'}）其他班`);
     if (teachesSubject) reasons.push('本学期任教同一科目');
-    if (freeAtSlot) reasons.push('该节次本人无课');
-    else reasons.push('该节次本人有课，需先解决该时段冲突');
+    reasons.push('该节次本人无课');
     reasons.push(dayCount === 0 ? '当天没有排课' : `当天已排 ${dayCount} 节`);
     if (runAfter >= 3) reasons.push(`接手后将连续上 ${runAfter} 节`);
 
@@ -267,8 +277,6 @@ export function rankCandidates(input: CandidateInput): CandidateRanking {
   }
 
   kept.sort((a, b) => {
-    // 可行性先于一切：能直接接下的排在"需要先解决冲突"的前面
-    if (a.freeAtSlot !== b.freeAtSlot) return a.freeAtSlot ? -1 : 1;
     // 档位是主排序键：同班 > 同年级 > 跨年级，学科与课密度只在档位内部起作用
     if (TIER_ORDER[a.tier] !== TIER_ORDER[b.tier]) {
       return TIER_ORDER[a.tier] - TIER_ORDER[b.tier];
@@ -354,8 +362,14 @@ export function swapDayAfter(input: {
 export interface SwapOptionEvaluation {
   readonly dayCountAfter: number;
   readonly longestRunAfter: number;
+  /** 发起人接手对方那一节之后，当天共几节 */
+  readonly myDayCountAfter: number;
+  /** 发起人接手后的最长连续上课节数 */
+  readonly myLongestRunAfter: number;
   /** 偏好排除原因；非空表示这次对调按当前口径不该推荐 */
   readonly excludedBy: readonly string[];
+  /** 不推荐但仍可选：把事实摆出来，不替发起人做决定 */
+  readonly warnings: readonly string[];
   /** 仅用于同一档位内排序，不代表能力评价 */
   readonly score: number;
   readonly reasons: readonly string[];
@@ -364,9 +378,14 @@ export interface SwapOptionEvaluation {
 /**
  * 评价"对方让出某一节课、接手我这一节课"在偏好口径下是否可行。
  *
- * 与代课共用同一套维度，但有两处必须区别对待：
+ * 两侧都要算，不能只算对方：
+ *   - 对方：让出一节、接手一节，当天课数可能不变（同一天换课）；
+ *   - 发起人：同样多一节少一节，但更常见的是跨天——那一天凭空多出一节，
+ *     正好卡在两节课中间时会直接变成连堂。发起人是做决定的人，这件事必须先摊在他面前。
+ *
+ * 与代课共用同一套维度，另外两处区别：
  *   - `busyAtSlot` 不适用：对方在我这一节有课，恰恰可能就是要换的那一节；
- *   - 当天课数与连堂按 `swapDayAfter` 实算，不能按 +1 近似。
+ *   - 当天课数与连堂按 `swapDayAfter` 实算，不按 +1 近似。
  */
 export function evaluateSwapOption(input: {
   readonly isSameClass: boolean;
@@ -375,21 +394,48 @@ export function evaluateSwapOption(input: {
   readonly myPeriod: number;
   readonly lessonDate: string;
   readonly lessonPeriod: number;
+  /** 对方在**我这一天**原本的节次（含要换出的那一节） */
   readonly theirPeriodsOnMyDate: readonly number[];
+  /** 我**在对方那一天**原本的节次（不含我要换出的那一节，因为它在另一天） */
+  readonly myPeriodsOnLessonDate: readonly number[];
   readonly preference: CandidatePreference;
 }): SwapOptionEvaluation {
   const after = swapDayAfter(input);
   const dayCountAfter = after.length;
   const run = longestRun(after);
 
+  // 换到我这一天的视角：我让出一节给 B，接手 B 那一节
+  const myAfter = swapDayAfter({
+    myDate: input.lessonDate,
+    myPeriod: input.lessonPeriod,
+    lessonDate: input.myDate,
+    lessonPeriod: input.myPeriod,
+    theirPeriodsOnMyDate: input.myPeriodsOnLessonDate,
+  });
+  const myDayCountAfter = myAfter.length;
+  const myRun = longestRun(myAfter);
+  // 换之前我在那天已经连着上几节。只把"这次对调造成的变长"算到这次头上：
+  // 学校本来就把某人排成连上四节时，再换一节不该被系统归咎于对调。
+  const myRunBefore = longestRun(input.myPeriodsOnLessonDate);
+
   const excludedBy: string[] = [];
+  const warnings: string[] = [];
   const limit = input.preference.exclude.consecutiveLimit;
   if (input.preference.exclude.consecutive && run >= limit) {
-    excludedBy.push(`接手后连续上 ${run} 节，达到 ${limit} 节上限`);
+    excludedBy.push(`对方接手后连续上 ${run} 节，达到 ${limit} 节上限`);
+  }
+  // 发起人自己的连堂：默认只警告，不禁止——有人就是愿意连着上完早点走。
+  // 判定看的是"换完之后实际连着上几节"，不是增量：原本就 4 连、换完还是 4 连，
+  // 对当事人仍然是 4 节的事实，不该因为"没变长"就不提。
+  // 学校在设置里勾了"接手后连上 ≥ N 节"才升级为不可选。
+  if (myRun >= limit) {
+    const message = `对调后你会连续上 ${myRun} 节（原本 ${myRunBefore} 节），达到 ${limit} 节上限`;
+    if (input.preference.exclude.consecutive) excludedBy.push(message);
+    else warnings.push(message);
   }
   if (input.preference.exclude.dayTotal && dayCountAfter > input.preference.exclude.dayTotalLimit) {
     excludedBy.push(
-      `接手后当天 ${dayCountAfter} 节，超过 ${input.preference.exclude.dayTotalLimit} 节上限`,
+      `对方接手后当天 ${dayCountAfter} 节，超过 ${input.preference.exclude.dayTotalLimit} 节上限`,
     );
   }
 
@@ -400,10 +446,12 @@ export function evaluateSwapOption(input: {
   const reasons: string[] = [];
   if (input.isSameClass) reasons.push('本学期任教该班');
   if (input.teachesSubject) reasons.push('本学期任教同一科目');
-  reasons.push(dayCountAfter === 1 ? '对调后当天只有 1 节' : `对调后当天 ${dayCountAfter} 节`);
-  if (run >= 2) reasons.push(`对调后连续上 ${run} 节`);
+  reasons.push(dayCountAfter === 1 ? '对调后对方当天只有 1 节' : `对调后对方当天 ${dayCountAfter} 节`);
+  if (run >= 2) reasons.push(`对调后对方连续上 ${run} 节`);
+  reasons.push(myDayCountAfter === 1 ? '对调后你当天只有 1 节' : `对调后你当天 ${myDayCountAfter} 节`);
+  if (myRun >= 2) reasons.push(`对调后你连续上 ${myRun} 节`);
 
-  return { dayCountAfter, longestRunAfter: run, excludedBy, score, reasons };
+  return { dayCountAfter, longestRunAfter: run, myDayCountAfter, myLongestRunAfter: myRun, excludedBy, warnings, score, reasons };
 }
 
 /** 中性默认：全部维度参与排序，但不隐藏任何教师。系统不替学校把口径写死。 */
@@ -415,7 +463,6 @@ export const NEUTRAL_PREFERENCE: CandidatePreference = Object.freeze({
     lightLoad: true,
   }),
   exclude: Object.freeze({
-    busyAtSlot: false,
     consecutive: false,
     consecutiveLimit: 3,
     dayTotal: false,

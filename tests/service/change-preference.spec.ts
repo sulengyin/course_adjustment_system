@@ -17,7 +17,6 @@ const BASE = {
   considerSameGrade: true,
   considerSameSubject: true,
   considerLightLoad: true,
-  excludeBusyAtSlot: false,
   excludeConsecutive: false,
   consecutiveLimit: 3,
   excludeDayTotal: false,
@@ -39,27 +38,27 @@ describe('代课候选筛选偏好', () => {
     const effective = service.effective('T-1');
     expect(effective.source).toBe('NEUTRAL');
     expect(effective.preference.consider.sameClass).toBe(true);
-    expect(effective.preference.exclude.busyAtSlot).toBe(false);
     expect(effective.preference.exclude.consecutive).toBe(false);
     expect(effective.preference.exclude.dayTotal).toBe(false);
   });
 
   it('课务管理人员设全校默认后，教师默认沿用', () => {
-    service.saveSchool({ ...BASE, excludeBusyAtSlot: true }, 'S-1');
+    service.saveSchool({ ...BASE, excludeConsecutive: true, consecutiveLimit: 4 }, 'S-1');
     const effective = service.effective('T-1');
     expect(effective.source).toBe('SCHOOL_DEFAULT');
-    expect(effective.preference.exclude.busyAtSlot).toBe(true);
+    expect(effective.preference.exclude.consecutive).toBe(true);
+    expect(effective.preference.exclude.consecutiveLimit).toBe(4);
   });
 
   it('教师自己的偏好覆盖全校默认', () => {
-    service.saveSchool({ ...BASE, excludeBusyAtSlot: true }, 'S-1');
-    service.saveTeacher('T-1', { ...BASE, excludeBusyAtSlot: false, excludeConsecutive: true });
+    service.saveSchool({ ...BASE, excludeConsecutive: true, consecutiveLimit: 4 }, 'S-1');
+    service.saveTeacher('T-1', { ...BASE, excludeConsecutive: false, consecutiveLimit: 3 });
     const effective = service.effective('T-1');
     expect(effective.source).toBe('TEACHER');
-    expect(effective.preference.exclude.busyAtSlot).toBe(false);
-    expect(effective.preference.exclude.consecutive).toBe(true);
+    expect(effective.preference.exclude.consecutive).toBe(false);
+    expect(effective.preference.exclude.consecutiveLimit).toBe(3);
     // 其他教师仍然用全校默认
-    expect(service.effective('T-2').preference.exclude.busyAtSlot).toBe(true);
+    expect(service.effective('T-2').preference.exclude.consecutive).toBe(true);
   });
 
   it('保存后留下更新时间与更新人', () => {
@@ -94,7 +93,7 @@ describe('偏好入参校验', () => {
   });
 
   it('字段缺失或非布尔一律拒绝，不静默补全', () => {
-    expect(parsePreferenceInput({ ...BASE, excludeBusyAtSlot: 'true' })).toBeNull();
+    expect(parsePreferenceInput({ ...BASE, excludeConsecutive: 'true' })).toBeNull();
     expect(parsePreferenceInput({ consecutiveLimit: 3 })).toBeNull();
     expect(parsePreferenceInput(null)).toBeNull();
     expect(parsePreferenceInput([])).toBeNull();

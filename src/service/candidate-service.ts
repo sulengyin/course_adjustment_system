@@ -95,8 +95,13 @@ export interface SwapOptionView {
   readonly remainingCount: number;
   /** 只提示、不排除：可能被拒的原因 */
   readonly hints: readonly string[];
+  /** 不推荐但仍可选：例如对调后发起人会连堂，事实摆出来，由他自己决定 */
+  readonly warnings: readonly string[];
   /** 非空表示这次对调会撞课或违反偏好口径，不可选；原因照实给出，不静默丢弃 */
   readonly blockedReasons: readonly string[];
+  /** 对调后发起人当天共几节，以及最长连着上几节 */
+  readonly myDayCountAfter: number;
+  readonly myLongestRunAfter: number;
   /** 推荐理由（仅展示，不参与冲突判定） */
   readonly reasons: readonly string[];
   /** 仅用于同一组内排序 */
@@ -491,12 +496,14 @@ export class CandidateService {
             })
           : [];
       const viable = options.filter((o) => o.blockedReasons.length === 0);
+      // 摘要优先给不带连堂警告的课次；全都带警告时照实给，不假装没有问题
+      const clean = viable.filter((o) => o.warnings.length === 0);
       const base = {
         teacherId: teacher.id,
         teacherName: names.get(teacher.id) ?? null,
         tier,
         viableCount: viable.length,
-        sampleOptions: viable.slice(0, 3),
+        sampleOptions: (clean.length > 0 ? clean : viable).slice(0, 3),
         hints: viable[0]?.hints ?? [],
       };
 
@@ -643,6 +650,8 @@ export class CandidateService {
         lessonDate: row.date,
         lessonPeriod: row.period,
         theirPeriodsOnMyDate,
+        // 我在对方那一天原本的课：用来算"接手他这一节之后，我会不会连着上"
+        myPeriodsOnLessonDate: [...(myPeriodsByDate.get(row.date) ?? [])],
         preference: input.preference,
       });
       blockedReasons.push(...evaluation.excludedBy);
@@ -657,7 +666,10 @@ export class CandidateService {
         subjectName: row.subjectName,
         remainingCount: remaining.length,
         hints: swapHints({ isLanguageMath: input.isLanguageMath, remainingPeriods: remaining }),
+        warnings: evaluation.warnings,
         blockedReasons,
+        myDayCountAfter: evaluation.myDayCountAfter,
+        myLongestRunAfter: evaluation.myLongestRunAfter,
         reasons: evaluation.reasons,
         score: evaluation.score,
       };
@@ -666,6 +678,10 @@ export class CandidateService {
     options.sort((a, b) => {
       if ((a.blockedReasons.length === 0) !== (b.blockedReasons.length === 0)) {
         return a.blockedReasons.length === 0 ? -1 : 1;
+      }
+      // 连堂这类"不推荐但可选"的排在干净选项之后：不藏起来，也不占前排
+      if ((a.warnings.length === 0) !== (b.warnings.length === 0)) {
+        return a.warnings.length === 0 ? -1 : 1;
       }
       if ((a.hints.length === 0) !== (b.hints.length === 0)) {
         return a.hints.length === 0 ? -1 : 1;

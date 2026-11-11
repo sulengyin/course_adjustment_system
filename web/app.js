@@ -1653,16 +1653,18 @@ async function renderNewChange(panel, term, token) {
     return candidate?.teacherName ?? candidate?.teacherId ?? '';
   }
 
-  /** 分组只用于显示顺序，选择不受限：三组之外的人同样能选。 */
+  /**
+   * 候选名单只有一档：服务端已经把"该节次有课"的教师排除掉了。
+   * 代课是请对方来上这一节，对方同时段上课就接不了——那是撞课，不是匹配度问题。
+   * 第二组只为兼容服务端返回的异常数据，正常不会出现。
+   */
   function grouped() {
     if (candidates.length === 0) return [];
     const recommended = candidates.filter((c) => c.freeAtSlot);
-    const needSwap = candidates.filter((c) => !c.freeAtSlot && (c.teachesSubject || c.tier !== 'CROSS_GRADE'));
-    const others = candidates.filter((c) => !c.freeAtSlot && !c.teachesSubject && c.tier === 'CROSS_GRADE');
+    const others = candidates.filter((c) => !c.freeAtSlot);
     return [
-      { label: `推荐（该节次本人无课，共 ${recommended.length} 位）`, rows: recommended },
-      { label: `该节次有课 · 需先解决该时段冲突（共 ${needSwap.length} 位）`, rows: needSwap },
-      { label: `其他教师（共 ${others.length} 位）`, rows: others },
+      { label: `可代课（该节次本人无课，共 ${recommended.length} 位）`, rows: recommended },
+      { label: `该节次有课 · 无法接手（共 ${others.length} 位）`, rows: others },
     ].filter((g) => g.rows.length > 0);
   }
 
@@ -1764,7 +1766,13 @@ async function renderNewChange(panel, term, token) {
     }
     const shown = excluded.slice(0, 5).map((e) => `${e.teacherName ?? e.teacherId}（${e.reasons.join('；')}）`);
     const rest = excluded.length - shown.length;
-    excludedHint.textContent = `按当前筛选，另有 ${excluded.length} 位教师未列出：${shown.join('、')}${rest > 0 ? ` 等 ${excluded.length} 位` : ''}。取消勾选即可重新看到。`;
+    excludedHint.textContent = `另有 ${excluded.length} 位教师未列出：${shown.join('、')}${
+      rest > 0 ? ` 等 ${excluded.length} 位` : ''
+    }。${
+      excluded.some((e) => e.reasons.some((r) => r.includes('无法同时接手')))
+        ? '其中"该节次已有课"无法直接代课，要把他的课换过来请走"对调"。'
+        : ''
+    }`;
   }
 
   /** 候选不可用时把服务端原因说成人话，并且明确告诉老师"没有给你全量名单"。 */
@@ -2038,22 +2046,38 @@ async function renderNewChange(panel, term, token) {
     swapLessons.append(
       el('div', { class: 'picker-group' }, '选择对方要让出的那一节课（冲突项不可选，并写明原因）'),
     );
+    // 全部可选课次都会连堂时说一句总述：否则满屏标黄，人以为系统坏了
+    const viable = swapOptions.filter((o) => (o.blockedReasons ?? []).length === 0);
+    if (viable.length > 0 && viable.every((o) => (o.warnings ?? []).length > 0)) {
+      swapLessons.append(
+        el(
+          'p',
+          { class: 'hint' },
+          `这 ${viable.length} 节课换完之后你都会连堂。系统只把账算给你看，不介意可以照常选。`,
+        ),
+      );
+    }
     for (const option of swapOptions) {
       const blocked = (option.blockedReasons ?? []).length > 0;
-      const meta = blocked
-        ? option.blockedReasons.join('；')
-        : `${option.className} ${option.subjectName}${
-            (option.hints ?? []).length > 0 ? `｜提示：${option.hints.join('；')}` : ''
-          }`;
+      const warnings = option.warnings ?? [];
+      const parts = [];
+      if (blocked) parts.push(option.blockedReasons.join('；'));
+      else {
+        parts.push(`${option.className} ${option.subjectName}`);
+        if (warnings.length > 0) parts.push(`不推荐：${warnings.join('；')}`);
+        if ((option.hints ?? []).length > 0) parts.push(`提示：${option.hints.join('；')}`);
+      }
       const row = el(
         'button',
         {
           type: 'button',
-          class: `picker-row${swapLesson?.occurrenceId === option.occurrenceId ? ' is-selected' : ''}`,
+          class: `picker-row${swapLesson?.occurrenceId === option.occurrenceId ? ' is-selected' : ''}${
+            !blocked && warnings.length > 0 ? ' is-warn' : ''
+          }`,
           disabled: blocked,
         },
         el('span', { class: 'picker-name' }, swapSlotText(option)),
-        el('span', { class: 'picker-meta' }, meta),
+        el('span', { class: 'picker-meta' }, parts.join('｜')),
       );
       if (!blocked) {
         row.addEventListener('click', () => {
@@ -2375,7 +2399,6 @@ function buildPreferenceForm(initial) {
   const cbSameGrade = check(initial.considerSameGrade);
   const cbSameSubject = check(initial.considerSameSubject);
   const cbLightLoad = check(initial.considerLightLoad);
-  const cbBusy = check(initial.excludeBusyAtSlot);
   const cbRun = check(initial.excludeConsecutive);
   const numRun = num(initial.consecutiveLimit);
   const cbTotal = check(initial.excludeDayTotal);
@@ -2398,10 +2421,10 @@ function buildPreferenceForm(initial) {
     el(
       'div',
       { class: 'row' },
-      el('label', { class: 'check' }, cbBusy, '该节次本人有课'),
       el('label', { class: 'check' }, cbRun, '接手后连上 ≥', numRun, '节'),
+      el('label', { class: 'check' }, cbTotal, '接手后当天超过', numTotal, '节'),
     ),
-    el('div', { class: 'row' }, el('label', { class: 'check' }, cbTotal, '接手后当天超过', numTotal, '节')),
+    el('p', { class: 'hint' }, '该节次已有课的教师不会出现在代课候选里——那是撞课，不是筛选口径。要换他的课请走“对调”。'),
     el('p', { class: 'hint' }, '该班当天同一科目达到', numSubjectDay, '节时提示（只提示，不排除）。'),
   );
 
@@ -2413,7 +2436,6 @@ function buildPreferenceForm(initial) {
         considerSameGrade: cbSameGrade.checked,
         considerSameSubject: cbSameSubject.checked,
         considerLightLoad: cbLightLoad.checked,
-        excludeBusyAtSlot: cbBusy.checked,
         excludeConsecutive: cbRun.checked,
         consecutiveLimit: Number(numRun.value),
         excludeDayTotal: cbTotal.checked,
@@ -2431,7 +2453,6 @@ function neutralPreferenceInput() {
     considerSameGrade: true,
     considerSameSubject: true,
     considerLightLoad: true,
-    excludeBusyAtSlot: false,
     excludeConsecutive: false,
     consecutiveLimit: 3,
     excludeDayTotal: false,
@@ -2441,7 +2462,7 @@ function neutralPreferenceInput() {
   };
 }
 
-const PREF_SOURCE_LABEL = { TEACHER: '我的偏好', SCHOOL_DEFAULT: '全校默认', NEUTRAL: '系统默认（不做减法）' };
+const PREF_SOURCE_LABEL = { TEACHER: '我的偏好', SCHOOL_DEFAULT: '全校默认', NEUTRAL: '系统默认（只排除撞课）' };
 
 async function renderSettings(view, token) {
   const res = await api('/api/preferences/change');
@@ -2454,7 +2475,6 @@ async function renderSettings(view, token) {
         considerSameGrade: pref.consider?.sameGrade ?? true,
         considerSameSubject: pref.consider?.sameSubject ?? true,
         considerLightLoad: pref.consider?.lightLoad ?? true,
-        excludeBusyAtSlot: pref.exclude?.busyAtSlot ?? false,
         excludeConsecutive: pref.exclude?.consecutive ?? false,
         consecutiveLimit: pref.exclude?.consecutiveLimit ?? 3,
         excludeDayTotal: pref.exclude?.dayTotal ?? false,

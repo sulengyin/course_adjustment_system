@@ -702,7 +702,6 @@ function toRecordJson(r: PreferenceRecord): Json {
     considerSameGrade: r.considerSameGrade,
     considerSameSubject: r.considerSameSubject,
     considerLightLoad: r.considerLightLoad,
-    excludeBusyAtSlot: r.excludeBusyAtSlot,
     excludeConsecutive: r.excludeConsecutive,
     consecutiveLimit: r.consecutiveLimit,
     excludeDayTotal: r.excludeDayTotal,

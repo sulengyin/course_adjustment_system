@@ -50,6 +50,18 @@ function firstOccurrence() {
   return row;
 }
 
+/** 找一节"同一时段还有别的教师在上课"的课次；演示排课无冲突时退回第一节。 */
+function occurrenceWithCollision() {
+  for (const row of db.queryAll(TERM, FROM, TO)) {
+    if (row.cancelled) continue;
+    const busyElsewhere = db
+      .queryAll(TERM, row.date, row.date)
+      .some((o) => !o.cancelled && o.period === row.period && o.teacherId !== row.teacherId);
+    if (busyElsewhere) return row;
+  }
+  return firstOccurrence();
+}
+
 describe('代课候选推荐服务', () => {
   it('本人课次给出候选，且不含本人', () => {
     const occ = firstOccurrence();
@@ -113,7 +125,6 @@ describe('代课候选：偏好生效与目标时段', () => {
   const PREF_BASE = {
     consider: { sameClass: true, sameGrade: true, sameSubject: true, lightLoad: true },
     exclude: {
-      busyAtSlot: false,
       consecutive: false,
       consecutiveLimit: 3,
       dayTotal: false,
@@ -122,33 +133,40 @@ describe('代课候选：偏好生效与目标时段', () => {
     hint: { classSubjectDay: true, classSubjectDayLimit: 2 },
   };
 
-  it('默认不隐藏任何人', () => {
-    const occ = firstOccurrence();
+  it('候选里不出现该节次有课的人；被排除者连同原因返回', () => {
+    const occ = occurrenceWithCollision();
     const result = service.suggest(TERM, occ.occurrenceId, teacher(occ.teacherId));
-    expect(result.excluded).toEqual([]);
-  });
-
-  it('勾选排除后，被排除的教师连同原因返回', () => {
-    const occ = firstOccurrence();
-    const result = service.suggest(TERM, occ.occurrenceId, teacher(occ.teacherId), {
-      preference: {
-        ...PREF_BASE,
-        exclude: { ...PREF_BASE.exclude, busyAtSlot: true },
-      },
-    });
     const busy = new Set(
       db
         .queryAll(TERM, occ.date, occ.date)
         .filter((r) => !r.cancelled && r.period === occ.period)
         .map((r) => r.teacherId),
     );
-    for (const c of result.candidates) expect(c.freeAtSlot).toBe(true);
+    // 候选里每个人在目标节次都没课；有课的人一个都不能混进来
+    for (const c of result.candidates) {
+      expect(c.freeAtSlot).toBe(true);
+      expect(busy.has(c.teacherId)).toBe(false);
+    }
+    // 被排除的人也必须是撞课的，并写明原因，不允许悄悄消失
     for (const e of result.excluded) {
       expect(busy.has(e.teacherId)).toBe(true);
       expect(e.reasons.join('；')).toContain('该节次本人有课');
       expect(e.teacherName).not.toBeNull();
     }
-    expect(result.candidates.length + result.excluded.length).toBe(db.refs().teachers.length - 1);
+    expect(result.candidates.length + result.excluded.length).toBe(
+      db.refs().teachers.length - 1,
+    );
+  });
+
+  it('偏好只影响连堂与总量阈值，不会把撞课的教师放回候选', () => {
+    const occ = firstOccurrence();
+    const result = service.suggest(TERM, occ.occurrenceId, teacher(occ.teacherId), {
+      preference: {
+        ...PREF_BASE,
+        exclude: { ...PREF_BASE.exclude, consecutive: false, dayTotal: false },
+      },
+    });
+    for (const c of result.candidates) expect(c.freeAtSlot).toBe(true);
   });
 
   it('换时间的方案按目标时段评估，不按原时段', () => {
@@ -169,7 +187,8 @@ describe('代课候选：偏好生效与目标时段', () => {
         .map((r) => r.teacherId),
     );
     for (const c of result.candidates) {
-      expect(c.freeAtSlot).toBe(!busy.has(c.teacherId));
+      expect(c.freeAtSlot).toBe(true);
+      expect(busy.has(c.teacherId)).toBe(false);
     }
   });
 

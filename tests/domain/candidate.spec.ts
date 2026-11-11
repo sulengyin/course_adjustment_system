@@ -109,8 +109,8 @@ describe('调课对象候选推荐', () => {
     expect(candidates.map((c) => c.teacherId)).toEqual(['T1', 'T2']);
   });
 
-  it('该节次有课的一律排在无课之后，即使匹配度更高', () => {
-    const { candidates } = rankCandidates(
+  it('该节次有课的一律不列：代课是请对方来上这一节，撞课就接不了', () => {
+    const { candidates, excluded } = rankCandidates(
       input({
         teaching: [
           { teacherId: 'T1', classId: 'C1', subjectId: 'S1' },
@@ -120,9 +120,11 @@ describe('调课对象候选推荐', () => {
         teachers: [{ id: 'T0' }, { id: 'T1' }, { id: 'T2' }],
       }),
     );
-    expect(candidates.map((c) => c.teacherId)).toEqual(['T2', 'T1']);
-    expect(candidates[1]?.freeAtSlot).toBe(false);
-    expect(candidates[1]?.reasons.join('；')).toContain('该节次本人有课，需先解决该时段冲突');
+    // T1 匹配度更高（同班 + 同科），但那一节有课，不能来——匹配度不能盖过物理冲突
+    expect(candidates.map((c) => c.teacherId)).toEqual(['T2']);
+    expect(excluded.map((e) => e.teacherId)).toEqual(['T1']);
+    expect(excluded[0]?.reasons.join('；')).toContain('该节次本人有课');
+    expect(excluded[0]?.reasons.join('；')).toContain('无法同时接手');
   });
 
   it('当天课程密度低的排在密度高的前面', () => {
@@ -183,7 +185,7 @@ describe('调课对象候选推荐', () => {
 });
 
 describe('偏好：排除条件', () => {
-  it('默认不隐藏任何人，只排序', () => {
+  it('默认不隐藏任何人：撞课除外，撞课不是偏好', () => {
     const { candidates, excluded } = rankCandidates(
       input({
         teachers: [{ id: 'T0' }, { id: 'T1' }, { id: 'T2' }],
@@ -191,21 +193,21 @@ describe('偏好：排除条件', () => {
         dayPeriodsByTeacher: { T1: [3, 4, 5, 6, 7, 8, 9] },
       }),
     );
-    expect(excluded).toEqual([]);
-    expect(candidates.map((c) => c.teacherId)).toContain('T1');
+    // 只有撞课的那位被排除，其余照常出现；连堂默认不排除
+    expect(excluded.map((e) => e.teacherId)).toEqual(['T1']);
+    expect(candidates.map((c) => c.teacherId)).toEqual(['T2']);
   });
 
-  it('勾选后排除该节次有课的教师，并给出原因', () => {
+  it('连堂与当天总量可以放开，但撞课不会因为放开而回到名单里', () => {
     const { candidates, excluded } = rankCandidates(
       input({
         teachers: [{ id: 'T0' }, { id: 'T1' }, { id: 'T2' }],
         busyAtSlot: ['T1'],
-        preference: pref({ exclude: { busyAtSlot: true } }),
+        preference: pref({ exclude: { consecutive: false, dayTotal: false } }),
       }),
     );
-    expect(candidates.map((c) => c.teacherId)).not.toContain('T1');
+    expect(candidates.map((c) => c.teacherId)).toEqual(['T2']);
     expect(excluded.map((e) => e.teacherId)).toEqual(['T1']);
-    expect(excluded[0]?.reasons.join('；')).toContain('该节次本人有课');
   });
 
   it('排除"接手后连上三节"的教师：只看教师本人连堂', () => {
@@ -362,7 +364,6 @@ describe('偏好：考虑项可关闭', () => {
       sameSubject: true,
       lightLoad: true,
     });
-    expect(NEUTRAL_PREFERENCE.exclude.busyAtSlot).toBe(false);
     expect(NEUTRAL_PREFERENCE.exclude.consecutive).toBe(false);
     expect(NEUTRAL_PREFERENCE.exclude.dayTotal).toBe(false);
     expect(NEUTRAL_PREFERENCE.exclude.consecutiveLimit).toBe(3);
@@ -404,7 +405,7 @@ describe('对调口径：按"换完之后"实算，不按 +1 近似', () => {
     exclude: { ...NEUTRAL_PREFERENCE.exclude, ...over },
   });
 
-  it('同一天换课：课数不变，连堂按换后的节次算', () => {
+  it('同一天换课：两边课数都不变，连堂按换后的节次算', () => {
     const r = evaluateSwapOption({
       isSameClass: true,
       teachesSubject: true,
@@ -413,11 +414,15 @@ describe('对调口径：按"换完之后"实算，不按 +1 近似', () => {
       lessonDate: '2026-11-02',
       lessonPeriod: 1,
       theirPeriodsOnMyDate: [1, 2],
+      myPeriodsOnLessonDate: [3, 4],
       preference: pref(),
     });
     // 对方原本 1、2 节；让出第 1 节、接手第 4 节 → 当天是 2、4 两节
     expect(r.dayCountAfter).toBe(2);
     expect(r.longestRunAfter).toBe(1);
+    // 我原本 3、4 节；让出第 4 节、接手第 1 节 → 当天是 1、3 两节
+    expect(r.myDayCountAfter).toBe(2);
+    expect(r.myLongestRunAfter).toBe(1);
   });
 
   it('跨天换课：那天多一节，但不把让出的那节算进去', () => {
@@ -429,14 +434,52 @@ describe('对调口径：按"换完之后"实算，不按 +1 近似', () => {
       lessonDate: '2026-11-05',
       lessonPeriod: 3,
       theirPeriodsOnMyDate: [2, 3],
+      myPeriodsOnLessonDate: [2],
       preference: pref(),
     });
     // 对方在我这天原本 2、3 节，接手我的第 4 节 → 2、3、4 三节连上
     expect(r.dayCountAfter).toBe(3);
     expect(r.longestRunAfter).toBe(3);
+    // 我在对方那天原本第 2 节，接手第 3 节 → 2、3 两节连上
+    expect(r.myDayCountAfter).toBe(2);
+    expect(r.myLongestRunAfter).toBe(2);
   });
 
-  it('偏好要求排除连堂时，达到上限给出具体理由而不是静默丢人', () => {
+  it('对调会让自己连堂时默认给警告，不静默把课次排到前面', () => {
+    const r = evaluateSwapOption({
+      isSameClass: true,
+      teachesSubject: false,
+      myDate: '2026-11-02',
+      myPeriod: 4,
+      lessonDate: '2026-11-05',
+      lessonPeriod: 3,
+      theirPeriodsOnMyDate: [],
+      myPeriodsOnLessonDate: [1, 2],
+      preference: pref(),
+    });
+    // 我在 11-05 原本 1、2 节，接手第 3 节 → 连着上 3 节
+    expect(r.myLongestRunAfter).toBe(3);
+    expect(r.warnings.join('；')).toContain('对调后你会连续上 3 节');
+    expect(r.excludedBy).toEqual([]);
+  });
+
+  it('声明了连堂上限时，自己的连堂同样升级为不可选', () => {
+    const r = evaluateSwapOption({
+      isSameClass: true,
+      teachesSubject: false,
+      myDate: '2026-11-02',
+      myPeriod: 4,
+      lessonDate: '2026-11-05',
+      lessonPeriod: 3,
+      theirPeriodsOnMyDate: [],
+      myPeriodsOnLessonDate: [1, 2],
+      preference: pref({ consecutive: true, consecutiveLimit: 3 }),
+    });
+    expect(r.warnings).toEqual([]);
+    expect(r.excludedBy.join('；')).toContain('对调后你会连续上 3 节');
+  });
+
+  it('偏好要求排除连堂时，对方一侧达到上限给出具体理由而不是静默丢人', () => {
     const r = evaluateSwapOption({
       isSameClass: true,
       teachesSubject: false,
@@ -445,10 +488,11 @@ describe('对调口径：按"换完之后"实算，不按 +1 近似', () => {
       lessonDate: '2026-11-05',
       lessonPeriod: 3,
       theirPeriodsOnMyDate: [1, 2, 3],
+      myPeriodsOnLessonDate: [],
       preference: pref({ consecutive: true, consecutiveLimit: 3 }),
     });
     expect(r.longestRunAfter).toBe(4);
-    expect(r.excludedBy.join('；')).toContain('连续上 4 节');
+    expect(r.excludedBy.join('；')).toContain('对方接手后连续上 4 节');
   });
 
   it('偏好要求排除当天总量时，超过上限给出理由', () => {
@@ -460,10 +504,11 @@ describe('对调口径：按"换完之后"实算，不按 +1 近似', () => {
       lessonDate: '2026-11-05',
       lessonPeriod: 3,
       theirPeriodsOnMyDate: [1, 2, 3, 4, 5],
+      myPeriodsOnLessonDate: [],
       preference: pref({ dayTotal: true, dayTotalLimit: 5 }),
     });
     expect(r.dayCountAfter).toBe(6);
-    expect(r.excludedBy.join('；')).toContain('当天 6 节');
+    expect(r.excludedBy.join('；')).toContain('对方接手后当天 6 节');
   });
 });
 

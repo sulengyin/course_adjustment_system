@@ -426,7 +426,6 @@ export interface PreferenceRecord {
   readonly considerSameGrade: boolean;
   readonly considerSameSubject: boolean;
   readonly considerLightLoad: boolean;
-  readonly excludeBusyAtSlot: boolean;
   readonly excludeConsecutive: boolean;
   readonly consecutiveLimit: number;
   readonly excludeDayTotal: boolean;
@@ -463,7 +462,6 @@ function toPreference(r: PreferenceRow): PreferenceRecord {
     considerSameGrade: r.consider_same_grade === 1,
     considerSameSubject: r.consider_same_subject === 1,
     considerLightLoad: r.consider_light_load === 1,
-    excludeBusyAtSlot: r.exclude_busy_at_slot === 1,
     excludeConsecutive: r.exclude_consecutive === 1,
     consecutiveLimit: r.consecutive_limit,
     excludeDayTotal: r.exclude_day_total === 1,
@@ -1254,7 +1252,7 @@ ${SELECT_EFFECTIVE_OVERLAY}
         record.considerSameGrade ? 1 : 0,
         record.considerSameSubject ? 1 : 0,
         record.considerLightLoad ? 1 : 0,
-        record.excludeBusyAtSlot ? 1 : 0,
+        1, // exclude_busy_at_slot：已改为硬约束，不再随偏好配置，见 CandidateExclude
         record.excludeConsecutive ? 1 : 0,
         record.consecutiveLimit,
         record.excludeDayTotal ? 1 : 0,

@@ -874,7 +874,7 @@ describe('页面渲染（最小 DOM）', () => {
           source: 'NEUTRAL',
           preference: {
             consider: { sameClass: true, sameGrade: true, sameSubject: true, lightLoad: true },
-            exclude: { busyAtSlot: false, consecutive: false, consecutiveLimit: 3, dayTotal: false, dayTotalLimit: 6 },
+            exclude: { consecutive: false, consecutiveLimit: 3, dayTotal: false, dayTotalLimit: 6 },
             hint: { classSubjectDay: true, classSubjectDayLimit: 2 },
           },
           canEditSchool: false,

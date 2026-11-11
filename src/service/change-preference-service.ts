@@ -26,7 +26,6 @@ export interface PreferenceInput {
   readonly considerSameGrade: boolean;
   readonly considerSameSubject: boolean;
   readonly considerLightLoad: boolean;
-  readonly excludeBusyAtSlot: boolean;
   readonly excludeConsecutive: boolean;
   readonly consecutiveLimit: number;
   readonly excludeDayTotal: boolean;
@@ -44,7 +43,6 @@ export function recordToPreference(record: PreferenceRecord): CandidatePreferenc
       lightLoad: record.considerLightLoad,
     },
     exclude: {
-      busyAtSlot: record.excludeBusyAtSlot,
       consecutive: record.excludeConsecutive,
       consecutiveLimit: record.consecutiveLimit,
       dayTotal: record.excludeDayTotal,
@@ -67,7 +65,6 @@ export function inputToPreference(input: PreferenceInput): CandidatePreference {
       lightLoad: input.considerLightLoad,
     },
     exclude: {
-      busyAtSlot: input.excludeBusyAtSlot,
       consecutive: input.excludeConsecutive,
       consecutiveLimit: input.consecutiveLimit,
       dayTotal: input.excludeDayTotal,
@@ -99,7 +96,6 @@ export function parsePreferenceInput(raw: unknown): PreferenceInput | null {
     'considerSameGrade',
     'considerSameSubject',
     'considerLightLoad',
-    'excludeBusyAtSlot',
     'excludeConsecutive',
     'excludeDayTotal',
     'hintClassSubjectDay',
@@ -117,7 +113,6 @@ export function parsePreferenceInput(raw: unknown): PreferenceInput | null {
     considerSameGrade: r.considerSameGrade as boolean,
     considerSameSubject: r.considerSameSubject as boolean,
     considerLightLoad: r.considerLightLoad as boolean,
-    excludeBusyAtSlot: r.excludeBusyAtSlot as boolean,
     excludeConsecutive: r.excludeConsecutive as boolean,
     consecutiveLimit,
     excludeDayTotal: r.excludeDayTotal as boolean,
@@ -134,7 +129,6 @@ export function preferenceToInput(pref: CandidatePreference): PreferenceInput {
     considerSameGrade: pref.consider.sameGrade,
     considerSameSubject: pref.consider.sameSubject,
     considerLightLoad: pref.consider.lightLoad,
-    excludeBusyAtSlot: pref.exclude.busyAtSlot,
     excludeConsecutive: pref.exclude.consecutive,
     consecutiveLimit: pref.exclude.consecutiveLimit,
     excludeDayTotal: pref.exclude.dayTotal,
@@ -176,7 +170,6 @@ export class ChangePreferenceService {
       considerSameGrade: input.considerSameGrade,
       considerSameSubject: input.considerSameSubject,
       considerLightLoad: input.considerLightLoad,
-      excludeBusyAtSlot: input.excludeBusyAtSlot,
       excludeConsecutive: input.excludeConsecutive,
       consecutiveLimit: input.consecutiveLimit,
       excludeDayTotal: input.excludeDayTotal,
@@ -198,7 +191,6 @@ export class ChangePreferenceService {
       considerSameGrade: input.considerSameGrade,
       considerSameSubject: input.considerSameSubject,
       considerLightLoad: input.considerLightLoad,
-      excludeBusyAtSlot: input.excludeBusyAtSlot,
       excludeConsecutive: input.excludeConsecutive,
       consecutiveLimit: input.consecutiveLimit,
       excludeDayTotal: input.excludeDayTotal,
