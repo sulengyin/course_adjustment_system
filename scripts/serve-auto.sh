@@ -132,8 +132,10 @@ start_one() {
   # 末尾的 --role 只是给 ps 认人用的标记，serve.ts 不读位置参数（参数全来自环境变量）。
   # 没有它就只能去读 /proc/<pid>/environ，而本机沙箱会拒绝，--stop-demo 会永远判成"没在跑"。
   # nohup + 重定向：关掉终端窗口服务也不受影响（docs/11 §3 第 1 条）。
+  # 用 node --import tsx 而不是 npx tsx：npx 会再套一层 shell，
+  # 停服务时按参数找到的是外层 npx，真实的 node 进程反而留下，端口仍被占。
   nohup env CA_BIND_ADDRESS="$IP" CA_PORT="$port" CA_DB_PATH="$db" \
-    npx tsx scripts/serve.ts "--role=$name" >>"$logfile" 2>&1 &
+    node --import tsx scripts/serve.ts "--role=$name" >>"$logfile" 2>&1 &
 }
 
 wait_ready() {
